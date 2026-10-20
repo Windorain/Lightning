@@ -25,7 +25,12 @@ const baseURL = `http://localhost:${port}`
 
 export default defineConfig({
   testDir: './e2e',
-  timeout: 180_000,
+  /**
+   * 6 台机位 = **6 次独立捕获**（合入内核重建后每台都走一次完整捕获/作业：
+   * 编译场景 + 解码全部纹理 + 离屏渲染 + 读回编码）。单台实测数秒到十几秒，
+   * 180s 对真产品（几十张纹理）不够 ⇒ 放到 10 分钟。这是**器具**配置，不是产品超时政策。
+   */
+  timeout: 600_000,
   expect: { timeout: 25_000 },
   fullyParallel: false,
   retries: 0,

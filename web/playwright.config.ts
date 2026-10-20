@@ -95,6 +95,20 @@ const TEST_IGNORE = testIgnoreGlobs()
  */
 const ACCEPT_SPEC_GLOB = '**/accept/**/*.spec.ts'
 
+/** #87 出图器具（见下条注释）——**不**在普通 e2e 套件里收集。 */
+const SHOT_SPEC_GLOB = '**/shot-ortho.spec.ts'
+
+/**
+ * **#87 指定机位出图器具**同样不进普通套件。
+ *
+ * 它的全部输入（`LIGHTNING_SHOT_E2E_PORT` / `MB_SHOT_PRODUCT` / `MB_SHOT_CAMERAS` /
+ * `MB_SHOT_CENTER` / `MB_SHOT_DIR`）由调用方注入，缺任一条就在 **import 期**抛错
+ * （`shot-ortho.spec.ts` 顶部，那是故意的：没被驱动就跑等于假绿）。它有自己的
+ * `playwright.shot.config.ts`（独立端口，`reuseExistingServer: false`），
+ * 若留在 `:tree/:smoke/:full` 的收集范围里，一次没给 env 的普通回归就会被
+ * 报成"PR 回归红"——与 accept replay 同一口径。
+ */
+
 /**
  * 验收 runner 的 `*.test.mjs` 是 **node:test** 单测（`node --test e2e/accept/runner/…`），
  * 不是 Playwright 用例。但 Playwright 的缺省 `testMatch` 也收 `*.test.*` ⇒ 它们会在
@@ -117,8 +131,8 @@ const TREE_NONCE =
 export default defineConfig({
   testDir: './e2e',
   // #332：真实产物未就绪的 spec 按产物门控排除（产物就绪时为空数组 ⇒ 全部纳入）
-  // 另加：验收 replay spec 不在普通套件里收集（见 ACCEPT_SPEC_GLOB）
-  testIgnore: [...TEST_IGNORE, ACCEPT_SPEC_GLOB, NODE_TEST_GLOB],
+  // 另加：验收 replay spec 与 #87 出图器具都不在普通套件里收集（见 ACCEPT_SPEC_GLOB / SHOT_SPEC_GLOB）
+  testIgnore: [...TEST_IGNORE, ACCEPT_SPEC_GLOB, NODE_TEST_GLOB, SHOT_SPEC_GLOB],
   // 服务身份核验：在任何用例之前断言"端口上的服务是本树的"
   globalSetup: './e2e/global-setup.ts',
   timeout: 90_000,
