@@ -139,6 +139,55 @@ normalizeEnvelope(raw):     既有 normalizeEnvelopeToPlain（payload base64 →
 `blend` 参与材质槽位的缓存键：同一张贴图在不同 pass 下出现时必须是两条材质，否则一方覆盖另一方
 且**没有任何报错**。
 
+### 3.2 `textureBlobs[]`：**一个 blob = 该面自己的像素**（横向多面子图带按面号裁列）
+
+`materialPalette[i].textureBlobIndex` 指向的 blob，语义是「**这个 quad 对应的那一面**的完整像素」，
+不是「这个 locator 解析到的那份资源文件」。二者在多数模组里相等，但有**一类模组不相等**：
+把同一方块的多个面**并排放进一张 PNG**（横向多面子图带），图集里按面注册成多个 sprite。
+
+首个实证是 IC2 2.2.828（`BlockTextureStitched.loadSubImage:125-141`）：
+
+| 资源 | 尺寸 | 面数 | 注册名 | sprite 取列 |
+|---|---|---|---|---|
+| `ic2:textures/blocks/generator/blockNuclearReactor.png` | **384×32** | 12 × 32px | `ic2:generator/blockNuclearReactor:0..5`（`BlockMetaData:42-45`） | `subIndex % 12` |
+| `ic2:textures/blocks/reactor/blockReactorChamber.png` | **192×32** | 6 × 32px | `ic2:reactor/blockReactorChamber:0..11`（`BlockMultiID:82-86`） | `subIndex % 6` |
+| `…/blockreactorvessel.png`（对照物） | 16×16 | 1 | 普通单图 | — |
+
+**导出侧规则（唯一权威，消费方不必懂任何具体模组）**
+
+1. 磁盘 PNG 读出后**与 sprite 对账**；命中下面四条即认定为横向多面带，只留第 `faceIndex % count` 列
+   （`count = pngWidth / iconWidth`，与游戏自身 `index %= count` 同口径）：
+   - sprite 命中（按**含 `:面号` 的原始材质键**查表）；
+   - `pngHeight == iconHeight`（**排除**竖向多帧：动画条的 `高 = 格高 × 帧数`）；
+   - `iconWidth == iconHeight`（方形格）；
+   - `pngWidth > iconWidth` 且 `pngWidth % iconWidth == 0`。
+2. **竖向动画条整条保留**（既有且正确：`animation` 帧序要靠它）。
+3. 其余原样返回——**字节不变**，故「同一张贴图的多个材质共享一个 blob」的去重口径不受影响。
+4. 裁切是**逐像素搬运，不调用任何缩放 API**：不许重采样。重采样会得到「形状对但糊」的假修复。
+5. **2 列带按游戏特例取列**：`count == 2` 时列号 = `faceIndex / 6`（不是 `faceIndex % count`）——
+   与 IC2 `BlockTextureStitched.loadSubImage` 的 `count==2` 分支一致（6 面 × inactive/active 各一列）。
+   实测 IC2 2.2.828 的 2 列带只有 `wiring/cable/blockDetectorCable` 与 `blockSplitterCable`（32×16）；
+   `BlockCable` 注册的 subIndex 是 0..5，用 `% 2` 会把 5 个面取到**不存在的第 2 列**。
+   （本批未对电缆做实机取证——判据在 `TextureStripCropTest#twoColumnStripFollowsGameDivideBySixRule`。）
+6. **拿不到面号就不裁**（不猜第 0 列）：面号只来自「含 `:面号` 的原始材质键 / sprite 注册名」。
+   ⚠ 归一化后的 locator **没有面号**——`ExportTextureLocator.stripWorldMetaSuffixInPathForBundle`
+   把 path 尾段的 `:0..15` 当世界 meta 剥掉了（`ic2:generator/blockNuclearReactor:3` →
+   `ic2:blocks/generator/blockNuclearReactor`），这是 #9 的成因之一，不是可用的面号来源。
+
+**IC2 2.2.828 jar 的带形态全量（blocks 空间 423 张贴图）**：竖向多帧 **18 张，全部是流体**
+（`fluids/*_still` 16×512、`*_flow` 32×1024）；2 列横带 **2 张**（`wiring/cable/blockDetectorCable`、
+`blockSplitterCable` 32×16）；≥6 列横带 **89 张**（如 `blockBarrel`、`blockNuke`）。
+`.mcmeta` 全量 21 个文件 = 上述 18 张流体 + 2 张**物品**贴图（`itemNanoSaber.active` / `plasmaLauncher`）
++ `pack.mcmeta` ⇒ **方块面贴图没有任何 mcmeta**，即 `BlockTextureStitched` 的 `animationLength` 分支
+（要求 `frameHeight > 0`）在方块面上永远不会走到，「竖向动画的方块面」在 IC2 里不存在。
+
+**为什么不是「把 UV 乘 32/384」**：那只对「恰好 12 面、且第 0 列就是这一面」成立，对 6 面的
+chamber、对任何 `subIndex ≠ 0` 的面全错，且掩盖了「取错素材」这个事实（Gitea #9 侦察报告 §7 方案 D）。
+
+**实现与判据**：`client/export/TextureStripCrop`（纯函数：读 IHDR / 取面号 / 算列号 / 裁列）+
+`TextureBlobEmbedder` 三处 disk 出口统一调用；判据 `TextureStripCropTest`（判定边界 / 面号来源 /
+像素保真 / 装配守卫）。
+
 ---
 
 ## 4. `multiblock` 对象

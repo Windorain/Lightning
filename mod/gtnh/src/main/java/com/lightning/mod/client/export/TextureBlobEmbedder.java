@@ -35,6 +35,10 @@ import cpw.mods.fml.relauncher.SideOnly;
  * 将 {@code materialPalette} 中每条材质的像素写入根级 {@code textureBlobs}（标准 Base64 PNG 字节）并设置
  * {@code textureBlobIndex}，供 Wiki 单文件消费。与 {@link ExportTextureLocator#normalizeLocatorForBundle} /
  * {@link ExportBundleClient} 的资源路径规则一致；优先读资源包 PNG（保留动画竖条），失败时再尝试图集 sprite 帧缓冲。
+ * <p>
+ * <b>横向多面子图带</b>（Gitea #9）：磁盘命中后必须与 sprite 对账一次——PNG 是 {@code iconW × iconH} 格的横带时，
+ * 只留「该面」那一列（{@link TextureStripCrop}），否则整条带会被下游当作一个面横压到面上（IC2 核反应堆/核反应仓
+ * 的「一排排黄黑竖条」）。竖向动画条（{@code 高 = iconH × 帧数}）不受影响：整条保留是既有且正确的行为。
  */
 @SideOnly(Side.CLIENT)
 public final class TextureBlobEmbedder {
@@ -138,7 +142,8 @@ public final class TextureBlobEmbedder {
 
         byte[] fromDisk = tryLoadPngForNormalizedLocator(rm, locator);
         if (fromDisk != null) {
-            return fromDisk;
+            byte[] column = cropHorizontalStripColumnIfAny(fromDisk, locator, standalone, spriteAtlas, null);
+            return column != null ? column : fromDisk;
         }
 
         TextureAtlasSprite spr = null;
@@ -175,7 +180,13 @@ public final class TextureBlobEmbedder {
                     String fromIcon = ExportTextureLocator.iconNameToLocator(iconName);
                     fromDisk = tryLoadPngForNormalizedLocator(rm, fromIcon);
                     if (fromDisk != null) {
-                        return fromDisk;
+                        byte[] column = cropHorizontalStripColumnIfAny(
+                            fromDisk,
+                            fromIcon,
+                            standalone,
+                            spriteAtlas,
+                            spr);
+                        return column != null ? column : fromDisk;
                     }
                     /*
                      * normalizeLocatorForBundle 对无显式纹理根（blocks/items/…）的路径默认补 blocks/。
@@ -189,7 +200,13 @@ public final class TextureBlobEmbedder {
                             String path = fromIcon.substring(c + 1);
                             fromDisk = tryLoadPng(rm, new ResourceLocation(ns, "textures/items/" + path + ".png"));
                             if (fromDisk != null) {
-                                return fromDisk;
+                                byte[] column = cropHorizontalStripColumnIfAny(
+                                    fromDisk,
+                                    fromIcon,
+                                    standalone,
+                                    spriteAtlas,
+                                    spr);
+                                return column != null ? column : fromDisk;
                             }
                         }
                     }
@@ -231,6 +248,86 @@ public final class TextureBlobEmbedder {
             locator,
             Boolean.valueOf(standalone));
         return getPlaceholderPngBytes();
+    }
+
+    /**
+     * 磁盘 PNG 若是一张<b>横向多面子图带</b>，只留「该面」那一列（Gitea #9，方案 A）。
+     * <p>
+     * <b>面号从哪来</b>：只认「含 {@code :面号} 的原始材质键 / sprite 注册名」（{@code spr.getIconName()} 优先，
+     * 入参 raw locator 兜底）。<b>绝不能</b>取自 {@link ExportTextureLocator#normalizeLocatorForBundle} 之后的
+     * locator——它把 {@code :0..15} 当世界 meta 剥掉了，面号在那里已经不存在（这正是缺陷的成因之一）。
+     * <p>
+     * 判定与裁切口径见 {@link TextureStripCrop}（方形格 / {@code pngHeight == iconHeight} / 宽整除 / 列号
+     * {@code faceIndex % count}）。任何一步不成立都返回 {@code null}，调用方原样使用磁盘字节——即「不确定就不裁」，
+     * 不猜第 0 列。
+     *
+     * @param diskPng     {@code tryLoadPng*} 读出的原始 PNG 字节
+     * @param materialKey 原材料键（含 {@code :面号}）；同时用于 sprite 查找与面号兜底
+     * @param knownSprite 已经查到的 sprite（可空；给了就不再重复查表）
+     * @return 该面那一列的 PNG；不适用/失败时 {@code null}
+     */
+    private static byte[] cropHorizontalStripColumnIfAny(byte[] diskPng, String materialKey, boolean standalone,
+        TextureMap spriteAtlas, TextureAtlasSprite knownSprite) {
+        int[] size = TextureStripCrop.readPngSize(diskPng);
+        if (size == null) {
+            return null;
+        }
+        int pngWidth = size[0];
+        int pngHeight = size[1];
+        /*
+         * 便宜的前置过滤：只有「宽 > 高 且 高整除宽」才可能是横向多面带。
+         * 常规正方形贴图在此直接返回，不触发 sprite 全表查找（导出可能有上千条材质）。
+         */
+        if (pngWidth <= pngHeight || pngWidth % pngHeight != 0) {
+            return null;
+        }
+        if (standalone) {
+            return null;
+        }
+        TextureAtlasSprite spr = knownSprite;
+        if (spr == null) {
+            for (TextureMap m : atlasProbeOrderForSpriteLookup(materialKey, spriteAtlas)) {
+                spr = MaterialKeyResolver.findSpriteForMaterialKey(materialKey, m);
+                if (spr != null) {
+                    break;
+                }
+            }
+        }
+        if (spr == null) {
+            return null;
+        }
+        int faceIndex = TextureStripCrop.faceIndexFromName(spr.getIconName());
+        if (faceIndex < 0) {
+            faceIndex = TextureStripCrop.faceIndexFromName(materialKey);
+        }
+        int iconWidth = spr.getIconWidth();
+        int iconHeight = spr.getIconHeight();
+        int column = TextureStripCrop.columnIndexForFace(pngWidth, pngHeight, iconWidth, iconHeight, faceIndex);
+        if (column < 0) {
+            return null;
+        }
+        try {
+            byte[] cropped = TextureStripCrop.cropColumn(diskPng, column, iconWidth, iconHeight);
+            FMLLog.info(
+                "[SDE] TextureBlobEmbedder: 横向多面子图带按面号裁列 locator=%s 带=%dx%d 面号=%d 列=%d/%d 格=%dx%d",
+                materialKey,
+                Integer.valueOf(pngWidth),
+                Integer.valueOf(pngHeight),
+                Integer.valueOf(faceIndex),
+                Integer.valueOf(column),
+                Integer.valueOf(pngWidth / iconWidth),
+                Integer.valueOf(iconWidth),
+                Integer.valueOf(iconHeight));
+            return cropped;
+        } catch (Exception e) {
+            FMLLog.warning(
+                "[SDE] TextureBlobEmbedder: 横向多面带裁列失败，回退整图（locator=%s, %dx%d, %s）",
+                materialKey,
+                Integer.valueOf(pngWidth),
+                Integer.valueOf(pngHeight),
+                e.toString());
+            return null;
+        }
     }
 
     /** Read sprite pixels from the GPU atlas texture via glGetTexImage. */
