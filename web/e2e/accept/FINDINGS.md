@@ -347,3 +347,47 @@ F12 修完后，游戏实拍与 Web 重渲逐机位对比（`temp/pr91-lp-after/
    仍会多画（有深度兜底，只在半透明时可见）。要放宽须先有"哪些差异不影响邻面渲染"的证据。
 3. 三条正视图判据（`front`/`back`/`seam-*`）**看不见**这类缺陷（共享面在正视图里退化成线）。
    以后凡"同块邻面/内部结构"类判据，必须至少含一台**斜视**机位。
+### F16.6 修复轮 3：translucent 深度序 —— 用户斜视机位抓出「远玻璃压近白框」
+
+**症状**（用户验收机位 yaw≈190 / elev≈18，透视）：近处成对玻璃的顶前白框条带内嵌一段暗色条。
+逐像素 + 投影复核证实：那段暗色是**远处独立玻璃块自身底边的斜角**（view-z ≈ −13）叠在**近处白框**
+（view-z ≈ −10.9）之上 —— 远的盖住近的，半透明面之间没有任何深度裁决。
+
+**根因**：同材质 translucent 四边形合并为**一个 Mesh**（实测该场景半透明共 2 个网格、世界坐标均在原点）
+⇒ three 的 object 级 back-to-front 排序失效（网格内三角形走缓冲序）+ translucent 不写深度
+⇒ 绘制顺序 = 批次顺序 ⇒ 后画的远玻璃覆盖先画的近玻璃框。
+
+**对 F16.5(1) 的更正**：旧说「MC 同 pass 也不做三角形级排序」**不精确**。运行期 Angelica **2.2.16**（tag 双核；
+本地仓 HEAD 为 2.0.0-alpha21，行号不同已注明）的实际语义：
+
+- 材质声明 translucent 但纹理是**二值 alpha** ⇒ 降级 `CUTOUT_MIPPED_MATERIAL`（pass 0、alphaTest 0.5、**写深度**）：
+  `AngelicaChunkBuildContext.java:117-125`（`git show 2.2.16` 核对）；cutoff `AlphaCutoffParameter.HALF = 0.5`（:69,:107）。
+- 真·部分透明 ⇒ `TRANSLUCENT_PASS`：`useReverseOrder(true)` + `useTranslucencySorting(true)`（:60-65）。
+- ACC 两张 CTM 贴图 alpha 直方图实测只有 {0,255}（blob1: 0×144/255×112；blob2: 0×192/255×64）⇒ **游戏里 ACC 走 cutout**，
+  深度裁决天然正确 —— 这正是「同一导出件游戏无此症状、web 有」的原因。
+
+**修复**（`77e9cbed`…`9a7d6f3f`）：`materialPassStateOf(blend, alphaClass)` —— translucent + binary|opaque ⇒ cutout 等价
+（alphaTest 0.5 + depthWrite:true）；partial|未知 ⇒ 原画家路径不变。alpha 三态分类（`domain/textureAlphaClass.ts`）在
+`kernelTextureResources#decodeOne` 像素就绪时计算，经 `TextureResource#alphaClass` → `TextureBinding#alphaClass` 送达
+**两个**消费点（`presenter#createMaterial`、旧链 `simpleMaterialLibrary`），类别计入 `materialIdentityOf`（解码前后 map 身份不变、
+只变类别，不进身份会被材质缓存命中旧态 —— 已有 `alphaClassMaterialRebuild.test.ts` 四条判据把守，含「换类别必换材质对象」负对照）。
+LP 管回归保护两半都成立：二值 ⇒ α=0 被 alphaTest 丢弃；真半透明 ⇒ 仍不写深度。
+
+**修后实测**（同一导出件 `deliver/gg-antimatter-casing-fixon-7cb442e4.json`）：
+
+| 项 | 读数 |
+|---|---|
+| 用户机位复拍（5186 视口，修前↔修后同机位逐像素） | 差异精确局限在顺序冲突区（yaw190：320 px @733-754,408-429 = 远玻璃底框压近处结构处）；修后远处暗角不再压近端白框 |
+| 六轴器具（shot-ortho，5212，r3）vs 修复轮 2 web | south/east/west/top/iso **0 px**；north **8 px**（远处贴图白叠近处白、R 差 2，修后取近者 = 方向修正） |
+| 六轴器具 vs 游戏锚点 | 轮廓/遮挡关系维持修复轮 2 已验收口径（整体亮度/底色为已登记差异） |
+| L0 | typecheck 仅既有 4 条（#407）；arch:scan **PASS（0 finding）** |
+| L1 | vitest **3161P/1F**（唯一红为既有 `partMaskEnvelopeExemption`）；本轮定向 4 文件 30/30 |
+| L2 | smoke @5212 **26P/0F/2S**，28.8 s（预算 120 s） |
+| L3 | **未跑**（未获授权） |
+
+**新登记**：① 真·部分透明（partial alpha）translucent 仍无三角形级排序（Angelica 有、我们无）——保留为登记限制，
+需逐像素对齐真半透明时单独立项；② 每面 2 层完全相同四边形在 partial-alpha 下会双重混合（与 #414 同单核实）；
+③ 副发现：presenter 材质释放键与缓存键不一致导致换绑定泄漏（已立 **#415**）。
+
+**两处有意取舍**（写进 `materialPass.ts` 注释）：游戏侧降级只对无动画元数据的 sprite 生效（web 对整幅含动画竖条分类）；
+游戏侧 renderPassOptimization/材质包覆盖两开关 web 无对应概念，恒按「优化打开」取语义。
