@@ -41,6 +41,7 @@ import {
   type TextureSequence,
 } from '@/domain/materials'
 import { sequenceKey, type TextureAnimationBinding } from '@/domain/textureAnimation'
+import type { TextureAlphaClass } from '@/domain/textureAlphaClass'
 import type { Result } from '@/domain/errors'
 
 /**
@@ -74,6 +75,23 @@ export interface TextureResource {
    * 只在 `state === 'ready'` 时可能出现 —— 没有像素就没有格数可推。
    */
   readonly animation?: TextureAnimationBinding
+  /**
+   * 贴图的 **alpha 类别**（`domain/textureAlphaClass` 的产出）。
+   *
+   * ## 为什么「缺席就是缺席」，且只在 `ready` 时在场
+   *
+   * 类别是**字节事实**：没有像素就没有可派生的类别。缺失时若补一个默认值
+   * （例如 `'partial'`），就会让"还没解码"与"确实是真半透明"在数据上不可区分 ——
+   * 而两者对`materialPassStateOf` 当前的**行为相同**（都走画家路径），
+   * 于是这个默认值只会掩盖"分类从未发生"这一实现缺陷。
+   * ⇒ 未解码/失败/未请求一律**不带该字段**；消费方按"未知"处理。
+   *
+   * ## 它为什么是派生而不是第二权威
+   *
+   * 它由 `pixels`（同一份字节）经纯函数算出，而 `identity.version` 也是字节派生的
+   * （内嵌资源走 `contentVersionOfBytes`）⇒ 同一身份 ⇒ 同一类别。它不是"另一个版本号"。
+   */
+  readonly alphaClass?: TextureAlphaClass
 }
 
 export type TextureState = 'unrequested' | 'loading' | 'ready' | 'missing' | 'failed'
@@ -111,6 +129,23 @@ export interface TextureBinding {
    * 呈现器换绑定后由 `setTextureBindings` 卸载重挂并立即重采样。
    */
   readonly animation?: TextureAnimationBinding
+  /**
+   * 该材质贴图的 **alpha 类别**（`bindTexture` 从 `TextureResource` 逐字复制；
+   * **缺席 = 未知**（还没解码）⇒ 真半透明路径）。
+   *
+   * ## 它为什么不进 {@link textureBindingKey}
+   *
+   * 那个键回答的是"这份绑定的**值**是什么"（材质身份 + 纹理内容身份 + 序列 + 相位），
+   * 用于资源同步去重与呈现器换绑定。类别是**内容的派生**：同一份内容（同一
+   * `assetId@contentVersion`）必然给出同一类别 ⇒ 把派生量再写进键 = 同一事实的两个来源
+   * （A28 的"第二权威"形态）。
+   *
+   * ## 那"未知 ⇒ 已分类"的转换靠什么生效
+   *
+   * 靠 `BatchedPresenter#setTextureBindings` 的**无条件**卸载重挂 + `materialIdentityOf`
+   * 把类别算进材质身份（见 presenter 的说明）：解码完成那一次换绑定必然重建材质。
+   */
+  readonly alphaClass?: TextureAlphaClass
   /**
    * 该材质的纹理**相位**绑定（G7 / #388 R2-①）。
    *
@@ -193,6 +228,12 @@ export function bindTexture(
     readonly state: TextureState
     /** 资源派生出的纹理序列（缺席 = 静态贴图；见 `textureAnimationOf`）。 */
     readonly animation?: TextureAnimationBinding
+    /**
+     * 资源派生出的 alpha 类别（**缺席 = 未知**：还没解码/解码失败）。
+     *
+     * 与 `animation` 同一形状纪律：只在场时复制，不写 `alphaClass: undefined`。
+     */
+    readonly alphaClass?: TextureAlphaClass
   } | null,
   sampling: TextureSampling = VOXEL_SAMPLING,
 ): TextureBinding {
@@ -217,6 +258,8 @@ export function bindTexture(
     missingRequired: resource.required && (resource.state === 'missing' || resource.state === 'failed'),
     // 缺席就是缺席（与 phaseOf 同一形状纪律）：静态贴图不得写出 `animation: undefined`。
     ...(resource.animation === undefined ? {} : { animation: resource.animation }),
+    // 同类纪律：类别未知 ⇒ 不写该字段（消费方按"未知 = 真半透明路径"处理）。
+    ...(resource.alphaClass === undefined ? {} : { alphaClass: resource.alphaClass }),
     ...phaseOf(material),
   })
 }

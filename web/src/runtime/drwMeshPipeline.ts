@@ -167,6 +167,17 @@ export interface DecodedPaletteTexture {
   readonly rgba: Uint8Array
   /** 诊断/排障用的稳定名字（`assetId@contentVersion`）。 */
   readonly name: string
+  /**
+   * 该像素的 **alpha 类别**（`opaque` / `binary` / `partial`；**缺席 = 未知**）。
+   *
+   * ## 为什么这里写**字面量联合**而不是 import `domain/textureAlphaClass` 的类型
+   *
+   * 与上面三个字段同一理由（见本接口上方"旧层 → 内核的每条边都要登记"那段）：本文件属旧层，
+   * 加一条旧→新 `type` 边就要进 `APPROVED_LEGACY_TO_KERNEL_EDGES` 并写退出阶段。
+   * 而这里需要的只是**一个已有值的形状**（由生产侧 `TextureResource#alphaClass` 原样传来），
+   * 不是"用内核类型做语义判断"。⇒ 就地声明同形联合，值仍只有一个来源。
+   */
+  readonly alphaClass?: 'opaque' | 'binary' | 'partial'
 }
 
 export interface DrwMeshPipelineDeps {
@@ -360,10 +371,16 @@ export function createDrwMeshPipeline(deps: DrwMeshPipelineDeps): DrwMeshPipelin
     const existing = textureCache.value
     if (existing && !existing.isDisposed()) return existing
     try {
-      textureCache.value = buildMaterialLibraryFromTextures(materialInput, (materialId) => {
-        const pixels = decodedPalette.get(materialId)
-        return pixels === undefined ? null : textureOfDecoded(pixels)
-      })
+      textureCache.value = buildMaterialLibraryFromTextures(
+        materialInput,
+        (materialId) => {
+          const pixels = decodedPalette.get(materialId)
+          return pixels === undefined ? null : textureOfDecoded(pixels)
+        },
+        // alpha 类别同样只是**查表**：生产点在唯一解码链
+        // （`composition/kernelTextureResources#decodeOne`），本文件不重算。
+        (materialId) => decodedPalette.get(materialId)?.alphaClass,
+      )
       return textureCache.value
     } catch (e) {
       // 图标库建不起来 ⇒ 图标降级为无（视口/画面不受影响）：这是**可降级**的呈现事实。

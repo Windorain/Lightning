@@ -920,9 +920,25 @@ interface CachedRef<T> {
  * §19.3：「资源引用包含稳定资源 ID 和内容版本/哈希，**URL 仅为获取位置**」。
  * 用 locator 会让"同一份贴图换了个镜像地址"变成两种材质（多余重建），
  * 而"同一 URL 覆盖上传"变成同一种材质（永不更新）—— 两个方向都错。
+ *
+ * ## 为什么 alpha 类别也进身份（#87 修复轮 3）
+ *
+ * 类别决定 `alphaTest`/`depthWrite` 两位（`domain/materialPass`），而"不同状态必须是不同
+ * 材质"正是本函数存在的理由（与 `tint`/`useVertexColor` 同一条：参数不同 ⇒ 不能共享缓存）。
+ *
+ * 它**不是**"第二个权威"：类别的来源是 `TextureBinding#alphaClass`，而那一位由**同一份字节**
+ * 派生（见 `textureBinding.ts` 的说明）。把派生量同时算进缓存键不产生第二个答案，
+ * 只是让"类别变了 ⇒ 换材质"成立在**身份层**，而不是依赖"卸载是否刚好把引用计数归零"。
+ *
+ * 这条在本轮修复里是**必需**的（不是保险）：解码完成时 `map` 的内容身份**不变**
+ * （内嵌资源的版本来自字节，解码前后同一个值），变的只有类别 —— 若类别不进身份，
+ * 缓存会命中修复前那个材质，"未知 ⇒ 已分类"的转换就只能靠引用计数归零这种副作用生效。
  */
 export function materialIdentityOf(descriptor: MaterialDescriptor, binding?: TextureBinding): ContentIdentity {
   const mapKey = binding?.map === undefined ? '-' : contentIdentityKey(binding.map)
+  // 类别键：缺席 = 未知（`-`），与 mapKey 的缺席口径一致；不得用 `partial` 冒充未知
+  // （两者行为相同，但"不知道"与"知道它是真半透明"必须是两个不同的缓存身份）。
+  const alphaKey = binding?.alphaClass ?? '-'
   // 相位进材质身份（#388 R2-①）：`-` = 无相位动画，`0/1` = 显式第 0 相位 ⇒ 两者是**两个**
   // 身份 ⇒ `materialCache` 不同条目（缺席相位不得复用第 0 相位的 GPU 材质）。
   // descriptor 是权威；`binding` 是它的派生（`bindTexture` 逐字复制），两处取 `??` 只为
@@ -931,7 +947,7 @@ export function materialIdentityOf(descriptor: MaterialDescriptor, binding?: Tex
   return {
     id:
       `material:${descriptor.id}:${descriptor.blend}:${descriptor.tint}:${descriptor.useVertexColor ? 'vc' : 'plain'}` +
-      `:${mapKey}:ph${phaseKey}`,
+      `:${mapKey}:ac${alphaKey}:ph${phaseKey}`,
     version: descriptor.version,
   }
 }
@@ -1065,7 +1081,12 @@ function createMaterial(
   // 混合/裁切**状态**取唯一映射（`domain/materialPass`）：两条渲染链共用一份判据，
   // 否则"同一导出件在两条链上画得不一样"只在有重叠半透明几何时才可见（实测缺陷：
   // 全透明的两张四边形把 LP 管接缝的竖板深度剔除，见 `domain/materialPass` 文件头）。
-  const pass = materialPassStateOf(descriptor.blend)
+  //
+  // **第二个输入是贴图的 alpha 类别**（#87 修复轮 3）：Angelica 会把"声明 TRANSLUCENT 但
+  // 贴图是二值 alpha"的材质降级为 CUTOUT_MIPPED ⇒ 这里必须按**同一语义**映射，
+  // 否则二值玻璃走"混合 + 不写深度"⇒ 远处玻璃盖住近处玻璃（深度顺序颠倒）。
+  // 类别缺席（还没解码）= 未知 ⇒ 映射退回修复前的画家路径（现状），由换绑定重建纠正。
+  const pass = materialPassStateOf(descriptor.blend, binding?.alphaClass)
   if (pass.transparent) {
     params.transparent = pass.transparent
     params.alphaTest = pass.alphaTest
