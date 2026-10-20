@@ -118,8 +118,6 @@ public final class TileEntitySpecialRendererPostRenderStrategy implements MeshCa
                 TessellatorCaptureState.armDynamicPassModelViewBaselineInverse(snapInv);
             }
             TessellatorCaptureState.beginDynamicExtensionVertexPhase();
-            com.lightning.mod.client.meshcapture.LpPipeCaptureDiag
-                .dump("before", te, wx, wy, wz);
             try {
                 TileEntityRendererDispatcher.instance.renderTileEntityAt(
                     te,
@@ -129,8 +127,6 @@ public final class TileEntitySpecialRendererPostRenderStrategy implements MeshCa
                     pt);
             } finally {
                 TessellatorCaptureState.endDynamicExtensionVertexPhase();
-                com.lightning.mod.client.meshcapture.LpPipeCaptureDiag
-                    .dump("after", te, wx, wy, wz);
             }
         } finally {
             TileEntityRendererDispatcher.staticPlayerX = spx;

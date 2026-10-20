@@ -36,8 +36,8 @@ import net.minecraft.tileentity.TileEntity;
  *
  * <h2>为什么全反射</h2>
  * LP 在本树只是 {@code runtimeOnlyNonPublishable} 依赖（{@code dependencies.gradle:82}），编译期没有
- * LP 类型可 import；与 {@code LpPipeCompleter}/{@code LpPipeCaptureDiag} 的既有做法一致，类名以字符串
- * 持有，只在真正遇到该族 TE 时才触达 LP 类。
+ * LP 类型可 import；与 {@code LpPipeCompleter} 的既有做法一致，类名以字符串持有，只在真正遇到该族
+ * TE 时才触达 LP 类。
  */
 public final class LpPipeRenderStateProvider implements TileRenderStateProvider {
 

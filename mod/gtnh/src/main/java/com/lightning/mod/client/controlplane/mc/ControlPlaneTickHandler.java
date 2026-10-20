@@ -5,7 +5,6 @@ import net.minecraft.client.Minecraft;
 import com.lightning.mod.client.controlplane.core.JobQueue;
 import com.lightning.mod.client.controlplane.mc.cmd.CommandArtifactRegistrar;
 import com.lightning.mod.client.controlplane.mc.input.InputExpiryPump;
-import com.lightning.mod.client.meshcapture.LpPipeCaptureDiag;
 
 import cpw.mods.fml.common.eventhandler.SubscribeEvent;
 import cpw.mods.fml.common.gameevent.TickEvent;
@@ -84,8 +83,6 @@ public final class ControlPlaneTickHandler {
             // 输入持键的到期结算（D-7）：排在作业排空**之后**——先把本 tick 的作业推进完，
             // 再由本泵收口它留下的到期项（幂等；无持有时是空操作，失败只 WARN 一次不刷屏）
             InputExpiryPump.tick();
-            // 诊断用（非修复）：客户端侧 LP 管状态周期探针，-Dsde.lpProbe=x,y,z 开启（Gitea #410 判别实验）
-            LpPipeCaptureDiag.probeTick(mc);
         } catch (Throwable t) {
             CpLog.error(t, "控制面 tick 排空异常（已吞掉，不影响游戏）");
         }
