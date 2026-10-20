@@ -10,6 +10,7 @@ import { buildVoxelVolume } from '../data/grid'
 import { voxelLinearIndex, AIR_COMPONENT } from './voxelComponents'
 import { effectiveVoxelState, type LayerPreviewMode } from '../data/layerPreview'
 import type {
+  BlockPaletteEntry,
   FaceName,
   StructureDefinition,
   VoxelVolume,
@@ -28,7 +29,7 @@ export { bakedQuadTriangleAttributesPure } from './structureGeometryUVs'
 export interface StructureGeometryGatherOptions {
   layerPreview?: LayerPreviewMode
   /**
-   * 是否剔除被 opaque 邻居或同 palette 共面遮挡的四边形。
+   * 是否剔除被**不透明邻居**或**同一方块邻面**遮挡的四边形（身份口径见 `sameBlockStateOf`）。
    * 预览/渲染默认剔除；OBJ 全量导出传 `false`。
    */
   cullOccludedQuads?: boolean
@@ -122,7 +123,59 @@ function shouldCullQuadFacingOpaqueNeighbor(
   return def.blockPalette[idx].occludesAdjacentFaces === true
 }
 
-function shouldCullQuadFacingSamePaletteNeighbor(
+/**
+ * 两格是不是**同一个方块状态**（→ 邻面不渲染）。
+ *
+ * ## 为什么不能用调色板下标当身份（#87 ACC 成对玻璃实测缺陷的根因）
+ *
+ * 调色板槽位是**渲染变体**：同一方块状态因渲染期差异（CTM 连通解析、AO 上下文…）
+ * 会被导出成**多个条目**，各自一套四边形。实测：GG 反物质外壳成对相邻的两格在导出件里
+ * 是 `blockPalette[2]` 与 `blockPalette[3]`，都是 `GoodGenerator:antimatterContainmentCasing`
+ * meta 0（无 `facing`/`nbt`），只是 CTM 象限贴图排列互为镜像。
+ *
+ * 而游戏侧剔除同块邻面判的是**方块**而不是渲染变体：GT 的
+ * `goodgenerator.blocks.regularBlock.BlockFrame#shouldSideBeRendered` 判的是
+ * `getBlock(...) instanceof BlockFrame`（运行期 5.09.54.194 的 jar 已 javap 双核），
+ * 与"这一格导出成了第几个调色板槽"无关。用槽位相等代替方块身份 ⇒ 同一方块的两个
+ * 变体之间**不剔除** ⇒ 成对玻璃的共享面被画出来（web 里以白框线可见，而游戏里该面从不渲染）。
+ *
+ * ## 身份取什么：`VoxelState` 的四个字段（`schema/types.ts` 的方块状态类型）
+ *
+ * `registryId` + `meta` + `facing` + `nbt` —— 这四项正是 `buildVoxelVolume` 还原出的
+ * `VoxelState`（`render/data/grid.ts`），即"这里是哪个方块的什么状态"。
+ * **不含** `geometry`/`thumbnail`/`tooltip`：那些是该条目的呈现资源，不是身份；
+ * 这也是本判据与 `domain/blockGeometry#blockPaletteEntryKey`（条目**内容**键，
+ * 用于去重、含 `assetId` 等）的分工 —— 两者判的不是同一件事，故不共用一份实现。
+ *
+ * **边界（如实登记）**：MC 侧的 `instanceof` 比这更宽（连 meta/NBT 都不看）。这里取
+ * "同状态"是**保守**选择：① 不改变既有夹具的剔除结果（`domain/blockGeometry` 记的
+ * `4882 → 4862` 那条历史观测保持成立）；② 判据偏窄只会"多画"，不会画出空洞。
+ */
+function sameBlockStateOf(a: BlockPaletteEntry, b: BlockPaletteEntry): boolean {
+  if (a === b) return true
+  if (a.registryId !== b.registryId) return false
+  if (a.meta !== b.meta) return false
+  if (a.facing !== b.facing) return false
+  return nbtKeyOf(a.nbt) === nbtKeyOf(b.nbt)
+}
+
+/**
+ * `nbt` 的比较口径：`JSON.stringify`（与 `blockPaletteEntryKey` 同一口径 —— 此处只用于
+ * **比较**，不做身份摘要）。键序不同会判为不同 ⇒ 不剔除，方向是"多画"。
+ */
+function nbtKeyOf(nbt: unknown): string {
+  return nbt === undefined || nbt === null ? '-' : JSON.stringify(nbt)
+}
+
+/**
+ * 邻格是**同一方块**（同一状态，见 {@link sameBlockStateOf}）⇒ 该面不渲染。
+ *
+ * 与 `shouldCullQuadFacingOpaqueNeighbor` 的分工：那条管"邻格不透明"（深度自会挡住），
+ * 本条管"邻格是同一种方块"——对应游戏侧 `shouldSideBeRendered` 的另一半：
+ * 同块相邻时**根本不发**这个面。两条都只在**自身不是不透明块**时才可能命中
+ * （不透明块的面由邻格的 `occludesAdjacentFaces` 决定，见调用点）。
+ */
+function shouldCullQuadFacingSameBlockNeighbor(
   def: StructureDefinition,
   volume: VoxelVolume,
   layerPreview: LayerPreviewMode,
@@ -134,6 +187,7 @@ function shouldCullQuadFacingSamePaletteNeighbor(
   paletteIndex: number,
 ): boolean {
   const selfEntry = def.blockPalette[paletteIndex]
+  if (selfEntry === undefined) return false
   if (selfEntry.occludesAdjacentFaces === true) return false
   const { dc, dr, dz } = gridStepForOutwardWorldFace(worldFace)
   const ncol = col + dc
@@ -142,9 +196,12 @@ function shouldCullQuadFacingSamePaletteNeighbor(
   const nState = effectiveVoxelState(volume, ncol, nrow, nz, sizeRow, layerPreview)
   if (isAirState(nState)) return false
   const nidx = def.cellGrid[nz]?.[nrow]?.[ncol]
-  if (nidx === undefined || nidx < 0 || nidx !== paletteIndex) return false
-  if (def.blockPalette[nidx].occludesAdjacentFaces === true) return false
-  return true
+  if (nidx === undefined || nidx < 0) return false
+  const nEntry = def.blockPalette[nidx]
+  if (nEntry === undefined) return false
+  // 邻格不透明 ⇒ 该面由深度自然挡住，不在此处判身份。
+  if (nEntry.occludesAdjacentFaces === true) return false
+  return sameBlockStateOf(nEntry, selfEntry)
 }
 
 /** 将若干四边形片段的非索引属性拼接为一块（供体素×材质合并或外部再算法线） */
@@ -291,7 +348,7 @@ export function collectStructureGeometryPiecesPure(
                 ) {
                   continue
                 } else if (
-                  shouldCullQuadFacingSamePaletteNeighbor(
+                  shouldCullQuadFacingSameBlockNeighbor(
                     def,
                     volume,
                     layerPreview,
@@ -311,7 +368,7 @@ export function collectStructureGeometryPiecesPure(
               ) {
                 continue
               } else if (
-                shouldCullQuadFacingSamePaletteNeighbor(
+                shouldCullQuadFacingSameBlockNeighbor(
                   def,
                   volume,
                   layerPreview,
