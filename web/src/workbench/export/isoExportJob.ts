@@ -27,7 +27,13 @@ import { createThreeOffscreenDevice } from '@/adapters/export/renderDevice'
 import { assembleSnapshotExportJob } from '@/adapters/export/snapshotExportJob'
 import type { JobOutcome } from '@/runtime/exportJob'
 import type { TextureDecoder } from '@/composition/kernelTextureResources'
-import { captureExportSnapshot, type ExportCapture, type ExportCaptureKind, type ExportCaptureSource } from '@/composition/exportCapture'
+import {
+  captureExportSnapshot,
+  type ExportCapture,
+  type ExportCaptureKind,
+  type ExportCaptureSource,
+  type ShotCaptureOptions,
+} from '@/composition/exportCapture'
 
 /**
  * 等轴导出的渲染边长（**唯一来源**；Q1 裁决，M6-5 收口）。
@@ -54,16 +60,33 @@ export const EXPORT_PIXEL_SIZE = 480
  */
 export const SCENE_GIF_PIXEL_SIZE_RANGE = Object.freeze({ min: 64, max: 512 })
 
+/**
+ * 验收器具出图的**不透明天空底**（#87 三对齐；旧器具 `SHOT_DEFAULT_BACKGROUND` 同值同名迁移）。
+ *
+ * 为什么器具不用透明底：像素级判据（"非空白"/包围盒）必须先能区分"空"与"内容"。
+ * 透明底解码后空像素的 RGB 也是 0，会被判成内容 ⇒ 整幅都算非空白（**假绿**）。
+ * 取 MC 天空蓝也让器具有图与游戏截图有共同底色，便于目视对照。
+ */
+export const SHOT_PNG_BACKGROUND = 0x9ec6e8
+
 /** 等轴导出的输入（两个命令与导出卡片的预览/生成共用这一份形状）。 */
 export interface IsoExportOptions {
   readonly kind: ExportCaptureKind
-  /** 0..3（调用方已归一）。 */
-  readonly directionIndex: number
+  /** 0..3（调用方已归一）。给 `shot` 时**不读**（验收器具不用等轴方向）。 */
+  readonly directionIndex?: number
   /**
-   * 渲染边长（像素）。**搬运**自调用方（本模块不做夹取，见 `EXPORT_PIXEL_SIZE`
-   * 的说明：夹取只有命令侧一处；卡片与命令引用同一个常量）。
+   * 渲染边长（像素；正方）。**搬运**自调用方（本模块不做夹取，见 `EXPORT_PIXEL_SIZE`
+   * 的说明：夹取只有命令侧一处；卡片与命令引用同一个常量）。给 `shot` 时由它取代。
    */
-  readonly pixelSize: number
+  readonly pixelSize?: number
+  /**
+   * **验收器具的显式机位**（#87 §2.2 三对齐）：相对内容包围盒中心的落点 + 正交竖直全高
+   * + 任意分辨率。给定时捕获**不用**等轴四向相机；其余（内容快照/冻结帧序列/资源表/
+   * 作业装配/编码）**完全同一条链** —— 不新增渲染入口，也不改用户视口。
+   */
+  readonly shot?: ShotCaptureOptions
+  /** 产物文件名（缺省按 kind + 方向派生）。器具用它带出处名（`shot-<name>.png`）。 */
+  readonly fileName?: string
   /** 仅 `kind === 'image'`：场景秒（已由 `normalizeIsoSeconds` 归一）。 */
   readonly seconds?: number
   /**
@@ -110,7 +133,17 @@ export interface IsoExportResult {
 
 /** 一次导出作业的作用域（一个作业一个；进呈现层归属键）。 */
 function scopeOf(options: IsoExportOptions): string {
+  if (options.shot !== undefined) {
+    return 'shot-export-' + String(options.shot.width) + 'x' + String(options.shot.height)
+  }
   return 'iso-export-' + String(options.directionIndex) + '-' + String(options.pixelSize)
+}
+
+/** 产物文件名（**唯一**派生点：调用方给了 `fileName` 就原样用，否则按 kind + 方向派生）。 */
+function fileNameOf(options: IsoExportOptions, kind: ExportKind, encoding: ArtifactEncoding): string {
+  if (options.fileName !== undefined) return options.fileName
+  const dir = String(options.directionIndex ?? 0)
+  return (options.kind === 'image' ? 'iso-' : 'anim-') + dir + '.' + fileExtensionOf(kind, encoding)
 }
 
 /**
@@ -124,12 +157,15 @@ export async function runIsoExport(
 ): Promise<Result<IsoExportResult>> {
   const captured = await captureExportSnapshot(source, {
     kind: options.kind,
-    directionIndex: options.directionIndex,
-    pixelSize: options.pixelSize,
+    ...(options.directionIndex === undefined ? {} : { directionIndex: options.directionIndex }),
+    ...(options.pixelSize === undefined ? {} : { pixelSize: options.pixelSize }),
+    ...(options.shot === undefined ? {} : { shot: options.shot }),
     ...(options.seconds === undefined ? {} : { seconds: options.seconds }),
     decoder: options.decoder,
     now: options.now,
-    requestId: 'iso-export-' + String(options.directionIndex),
+    requestId: options.shot === undefined
+      ? 'iso-export-' + String(options.directionIndex)
+      : 'shot-export-' + String(options.now),
     ...(options.loopLimits === undefined ? {} : { loopLimits: options.loopLimits }),
   })
   if (!captured.ok) return err(captured.error)
@@ -174,14 +210,18 @@ export async function runIsoExport(
   try {
     const outcome = await handlers.job.run()
     if (outcome.status === 'cancelled') {
-      return err(unsupportedOperation({ reason: 'exportCancelled', direction: options.directionIndex }))
+      return err(
+        unsupportedOperation({
+          reason: 'exportCancelled',
+          target: options.shot === undefined ? String(options.directionIndex) : 'shot',
+        }),
+      )
     }
     if (outcome.status === 'failed') {
       // 失败原因**原样**带出（作业的诊断是结构化值；这里只做包装，不改写 reason）。
       return err(outcome.error as DomainError)
     }
-    const dir = String(options.directionIndex)
-    const fileName = (options.kind === 'image' ? 'iso-' : 'anim-') + dir + '.' + fileExtensionOf(kind, encoding)
+    const fileName = fileNameOf(options, kind, encoding)
     return ok(
       Object.freeze({
         bytes: outcome.bytes,
@@ -196,6 +236,42 @@ export async function runIsoExport(
     // 中止订阅必须撤销（否则长寿命 `AbortController` 会累积回调）。
     handlers.detachAbort()
   }
+}
+
+/** 验收器具一次出图的输入（#87 §2.2 三对齐）。 */
+export interface ShotExportOptions {
+  /** 显式正交机位（相对内容包围盒中心）+ 任意分辨率。 */
+  readonly shot: ShotCaptureOptions
+  /** 产物文件名（必填：器具按机位名落盘，缺名就无法对账）。 */
+  readonly fileName: string
+  /** 纹理解码器（注入；生产由命令层给 `DomTextureDecoder`）。 */
+  readonly decoder: TextureDecoder
+  /** 注入时钟（本模块不读 `Date.now()`）。 */
+  readonly now: number
+  readonly signal?: AbortSignal
+  readonly onSemantics?: (findings: readonly ExportSemanticFinding[]) => void
+}
+
+/**
+ * 验收器具：**指定正交机位**出一张 PNG（走与产品命令**同一条**捕获/作业链）。
+ *
+ * 与 `runIsoExport` 的差别只有取景来源（显式值 vs 等轴四向表）与产物名；
+ * 内容快照、冻结帧、资源清单、离屏端口、编码器全部同一份 —— 器具因此不会
+ * 变成"第二条渲染链"（`tests/architecture/export-chain.test.ts` C1/C3 把守）。
+ */
+export async function runShotExport(
+  source: ExportCaptureSource,
+  options: ShotExportOptions,
+): Promise<Result<IsoExportResult>> {
+  return runIsoExport(source, {
+    kind: 'image',
+    shot: options.shot,
+    fileName: options.fileName,
+    decoder: options.decoder,
+    now: options.now,
+    ...(options.signal === undefined ? {} : { signal: options.signal }),
+    ...(options.onSemantics === undefined ? {} : { onSemantics: options.onSemantics }),
+  })
 }
 
 /**

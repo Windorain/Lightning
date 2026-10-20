@@ -7,6 +7,14 @@
  *  - 本 spec 走 `OPERATOR_EXPORT_SHOT_PNG`（真实下载链路）出**离屏正交图**，
  *    机位由 env 给定，像素直接可进证据链。
  *
+ * ## 合入 Web 内核重建（d33a0f09）后的适配
+ *
+ * 器具命令不再自建 `WebGLRenderer`/`MeshBasicMaterial`（旧 `workbench/exportShotImage.ts`
+ * 已随旧烘焙链删除），而是**走与产品命令同一条链**：捕获内核呈现快照（`captureExportSnapshot`
+ * 的 `shot` 分支）→ 冻结作业（`ExportJob`）→ PNG 字节。故本 spec 不变：它只按 operator id +
+ * MC 口径 props 驱动，观测点仍是"下载到的 PNG 的像素"。底色由命令侧固定为不透明天空蓝
+ * （`SHOT_PNG_BACKGROUND`），本文件的"非底色"统计与它同源。
+ *
  * 环境变量（**缺任一即抛错**，不静默跳过）：
  *   LIGHTNING_SHOT_E2E_PORT  dev server 端口（见 playwright.shot.config.ts；不在本文件校验）
  *   MB_SHOT_PRODUCT          导出 JSON 绝对路径（Envelope 或 plain，两种都收）
@@ -131,7 +139,7 @@ async function readNonBackgroundStats(
       if (!ctx) throw new Error('2D context 不可用，无法校验出图像素')
       ctx.drawImage(img, 0, 0)
       const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height)
-      // 底色 = 天空蓝 0x9ec6e8（与 bakeShotPngDataUrl 的 SHOT_DEFAULT_BACKGROUND 一致）
+      // 底色 = 天空蓝 0x9ec6e8（与命令侧 SHOT_PNG_BACKGROUND 同值；见 workbench/export/isoExportJob）
       const sky = [0x9e, 0xc6, 0xe8]
       let minX = Infinity
       let minY = Infinity

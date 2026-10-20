@@ -29,6 +29,7 @@ import type { Version } from '@/domain/identity'
 import type { TextureDecoder } from '@/composition/kernelTextureResources'
 import type { TexturePixels } from '@/presentation/textureBinding'
 import { isoCameraSpecsOf } from '@/presentation/isoExportCamera'
+import { shotCameraSpecOf } from '@/presentation/shotCamera'
 import { createEncoderPort } from '@/adapters/export/encoderPort'
 import { assembleSnapshotExportJob } from '@/adapters/export/snapshotExportJob'
 import { createSnapshotOffscreenRenderPort } from '@/adapters/export/offscreenRenderPort'
@@ -237,6 +238,59 @@ describe('M6-3 · 捕获装配：派生场景 + 四个相机值 + 冻结帧', ()
     })
     expect(missing.ok).toBe(false)
     if (!missing.ok) expect(missing.error.params.reason).toBe('exportCaptureNoKernelDocument')
+  })
+
+  it('器具捕获（#87）：显式机位 → 请求相机 = shotCameraSpecOf 的值，分辨率任意且非正方', async () => {
+    const data = await fixtureOf()
+    const content = animatedContentOf(data.content)
+    const captured = await captureExportSnapshot(sourceOf({ ...data, content }), {
+      kind: 'image',
+      shot: { offset: [0, 0, 8], orthoHeight: 6, width: 96, height: 54 },
+      seconds: 0,
+      decoder,
+      now: 1_700_000_000_000,
+    })
+    expect(captured.ok).toBe(true)
+    if (!captured.ok) return
+    const c = captured.value
+    const expected = shotCameraSpecOf(c.bounds, { offset: [0, 0, 8], orthoHeight: 6 })
+    expect(expected.ok).toBe(true)
+    if (!expected.ok) return
+    // 生产装配：相机**逐位等于**由捕获到的真实 bounds 算出的值（不是手喂载荷）
+    expect(c.request.camera).toEqual(expected.value)
+    expect(c.request.camera.projection).toBe('orthographic')
+    // 任意分辨率：非正方、不 clamp
+    expect(c.request.render).toEqual({ width: 96, height: 54, background: 'transparent' })
+    // 落点相对内容中心（内核**不**平移内容）⇒ position − target 恒等于 offset
+    expect(c.request.camera.position.z - c.request.camera.target.z).toBeCloseTo(8, 9)
+    // 等轴四向值仍同批算出（诊断面），但**不是**被选中的那台相机
+    expect(c.cameras.length, '四向诊断值仍在').toBe(4)
+    expect(c.cameras, '选中相机必须来自显式机位（不是四向表里的某台）').not.toContainEqual(c.request.camera)
+    // 单帧、时间来自 seconds（与等轴 PNG 同一条时间语义）
+    expect(c.request.frames.length).toBe(1)
+    expect(c.request.frames[0]!.seconds).toBe(0)
+  })
+
+  it('器具捕获：非法分辨率 / 退化落点 ⇒ 显式失败（不静默夹取）', async () => {
+    const data = await fixtureOf()
+    const content = animatedContentOf(data.content)
+    const badSize = await captureExportSnapshot(sourceOf({ ...data, content }), {
+      kind: 'image',
+      shot: { offset: [0, 0, 8], orthoHeight: 6, width: 0, height: 54 },
+      decoder,
+      now: 0,
+    })
+    expect(badSize.ok).toBe(false)
+    if (!badSize.ok) expect(badSize.error.params.reason).toBe('exportCaptureRenderSizeInvalid')
+
+    const degenerate = await captureExportSnapshot(sourceOf({ ...data, content }), {
+      kind: 'image',
+      shot: { offset: [0, 0, 0], orthoHeight: 6, width: 32, height: 32 },
+      decoder,
+      now: 0,
+    })
+    expect(degenerate.ok).toBe(false)
+    if (!degenerate.ok) expect(degenerate.error.params.reason).toBe('shotOffsetDegenerate')
   })
 
   it('方向越界 ⇒ 显式失败（不静默夹取到 0）', async () => {

@@ -11,7 +11,14 @@
  * 纯函数：无副作用、无 DOM、不改写入参。
  */
 
-/** 出图机位（web 口径）——与 `workbench/exportShotImage.ts` 的 `ShotCameraSpec` 结构一致。 */
+/**
+ * 出图机位（web 口径）——**相对内容包围盒中心**的落点 + 诊断角 + 正交全高 + 分辨率。
+ *
+ * 消费方是 `presentation/shotCamera#shotCameraSpecOf`（把 `pos` / `orthoHeight` 变成内核
+ * 冻结的 `CameraSpec` 值）与 `operators/builtin/exportOperators#ExportShotPngOperator`。
+ * M6-3 前的旧烘焙器 `workbench/exportShotImage.ts` 已随旧链删除，本形状不随它消失：
+ * 它描述的是 **MC 口径 → 结构相对口径** 的换算，与哪台渲染器无关。
+ */
 export interface ShotCameraSpec {
   /** web 局部系相机落点（左上角前的观察点，不是目标点） */
   pos: { x: number; y: number; z: number }

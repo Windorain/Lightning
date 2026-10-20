@@ -7,9 +7,13 @@ import { normalizeIsoSeconds } from '@/application/captureInput'
 import {
   EXPORT_PIXEL_SIZE,
   SCENE_GIF_PIXEL_SIZE_RANGE,
+  SHOT_PNG_BACKGROUND,
+  blobOf,
   exportErrorText,
   runIsoExport,
+  runShotExport,
 } from '@/workbench/export/isoExportJob'
+import { mcSpecToShotCamera, type McCameraSpec } from '@/pure/mcShotCamera'
 import { createExportDiagnosticSink } from '@/workbench/export/exportCommandDiagnostics'
 import { objExportSemantics } from '@/application/exportSemantics'
 import { createDomTextureDecoder } from '@/adapters/textureDecode'
@@ -260,5 +264,109 @@ export const ExportSceneGifOperator: OperatorType = {
       // 同轴等轴 PNG：日志只留诊断，可见性由调用方承担。
       throw e
     }
+  },
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #87 验收器具：指定正交机位出图（OPERATOR_EXPORT_SHOT_PNG）
+// ─────────────────────────────────────────────────────────────────────────────
+
+function shotVec3(value: unknown, field: string): [number, number, number] {
+  if (!Array.isArray(value) || value.length !== 3) {
+    throw new Error(`${field} 必须是长度 3 的数组，实际 ${JSON.stringify(value)}`)
+  }
+  const out = value.map((v) => Number(v))
+  for (const v of out) {
+    if (!Number.isFinite(v)) throw new Error(`${field} 含非有限分量：${JSON.stringify(value)}`)
+  }
+  return [out[0]!, out[1]!, out[2]!]
+}
+
+function shotFiniteNumber(value: unknown, field: string): number {
+  const n = Number(value)
+  if (!Number.isFinite(n)) throw new Error(`${field} 必须是有限数，实际 ${JSON.stringify(value)}`)
+  return n
+}
+
+function shotPositiveInt(value: unknown, field: string): number {
+  const n = shotFiniteNumber(value, field)
+  if (!Number.isInteger(n) || n <= 0) throw new Error(`${field} 必须是正整数，实际 ${n}`)
+  return n
+}
+
+/**
+ * 指定正交机位出图（#87 §2.2「三对齐」验收器具）。
+ *
+ * 与 `OPERATOR_EXPORT_ISO_PNG` 的区别：机位（落点 / 方位 / 俯仰 / 正交全高 / 分辨率）
+ * **全部由调用方给定**，不做等轴四向、不做 AABB 自动贴合；`pos` / `yaw` / `pitch` 走
+ * **MC 控制面口径**，经 `pure/mcShotCamera` 换算成"相对内容包围盒中心"的落点后交给
+ * `runShotExport` —— 后者走与产品命令**同一条**捕获/作业链（内核呈现快照 + 冻结作业），
+ * 因此器具不会变成第二条渲染链，也不会借用用户视口。
+ *
+ * props（MC 口径）：
+ *  - `pos: [x,y,z]`  MC 世界坐标相机落点
+ *  - `yaw` / `pitch`  MC 偏航 / 俯仰（度，pitch 正 = 俯视）
+ *  - `orthoHeight`    正交竖直全高（方块数）
+ *  - `width` / `height` 输出分辨率（任意，不 clamp）
+ *  - `center: [x,y,z]` **结构中心的 MC 世界坐标（必传）**——世界锚点在内核解析链上
+ *                      丢失，只能由调用方从 SDE `scanBounds` + `cellGrid` 尺寸复原
+ *                      （见 `structureCenterFromScanBounds`）
+ *  - `name?`          文件名（`shot-<name||'unnamed'>.png`）
+ *
+ * `yaw` / `pitch` 在本器具里的角色与旧器具**一致**：它们是 MC 机位的**声明**，用于校验
+ * 入参完备性与换算口径（落点方向由 `pos − center` 表达，镜头恒看结构中心 —— 调用方按
+ * "瞄准结构中心"构造机位，#87 的六机位即如此）。换算结果里 `yawDeg`/`elevationDeg` 是
+ * 诊断字段，不参与出图。
+ *
+ * 仅支持**普通（非多方块）文档**：多方块文档的网格是装配产物、无单一世界锚点，本器具不服务。
+ */
+export const ExportShotPngOperator: OperatorType = {
+  id: 'OPERATOR_EXPORT_SHOT_PNG',
+  label: '导出指定机位 PNG',
+  description: '按 MC 控制面 CameraSpec（指定落点/方位/俯仰/正交全高/分辨率）渲染 PNG',
+
+  poll(ctx) {
+    return ctx.hasLoadedDocument()
+  },
+
+  async exec(ctx, props) {
+    if (!ctx.hasLoadedDocument()) return
+    if (ctx.kernelMultiblockBody() !== null) {
+      throw new Error(
+        'OPERATOR_EXPORT_SHOT_PNG：不支持「多方块为主」文档（网格为装配产物、无单一世界锚点）；本器具当前只服务单结构验收',
+      )
+    }
+
+    const mc: McCameraSpec = {
+      pos: shotVec3(props.pos, 'pos'),
+      yaw: shotFiniteNumber(props.yaw, 'yaw'),
+      pitch: shotFiniteNumber(props.pitch, 'pitch'),
+      orthoHeight: shotFiniteNumber(props.orthoHeight, 'orthoHeight'),
+      width: shotPositiveInt(props.width, 'width'),
+      height: shotPositiveInt(props.height, 'height'),
+    }
+    if (mc.orthoHeight <= 0) {
+      throw new Error(`orthoHeight 必须为正，实际 ${mc.orthoHeight}`)
+    }
+    const center = shotVec3(props.center, 'center')
+    const name = typeof props.name === 'string' && props.name.length > 0 ? props.name : 'unnamed'
+
+    // MC 口径 → 相对内容包围盒中心的落点（web 口径的唯一换算点）。
+    const web = mcSpecToShotCamera(mc, center)
+    const result = await runShotExport(ctx, {
+      shot: {
+        offset: [web.pos.x, web.pos.y, web.pos.z],
+        orthoHeight: web.orthoHeight,
+        width: web.width,
+        height: web.height,
+        // 像素级判据（非空白/包围盒）需要区分"空"与"内容"：透明底解码后两者 RGB 都是 0。
+        background: SHOT_PNG_BACKGROUND,
+      },
+      fileName: `shot-${name}.png`,
+      decoder: createDomTextureDecoder(),
+      now: Date.now(),
+    })
+    if (!result.ok) throw new Error(exportErrorText(result.error))
+    downloadBlob(result.value.fileName, blobOf(result.value))
   },
 }
