@@ -47,6 +47,9 @@ scripts/multiblock-pipeline/.out/
 
 scripts/acceptance/.out/
 
+# #420 Wiki 错材质审计输出（可再生，产物不入库）
+scripts/wiki-material-audit/.out/
+
 # P1.8 部件验收的归档与日志（可再生；oracle/ 为 P2.5 消费交付物，须入库不忽略）
 scripts/parts-acceptance/.out/
 
