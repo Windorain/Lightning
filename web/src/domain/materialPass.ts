@@ -11,14 +11,25 @@
  * ## 判据：跟着 **Angelica 的实际 pass** 走（不是"看起来合理"，也不是 MC 的声明层）
  *
  * 导出件的 `blend` 只记录方块的 RenderLayer 声明；**运行期**决定 pass 的是贴图透明度 + 声明，
- * 见 GTNH 运行期绑定的 Angelica（`mod/gtnh/dependencies.gradle:20` 的 `angelica: "2.2.16"`）
- * 的两处事实（本地源码仓符号已双核；见交付说明的版本核对）：
+ * 见 GTNH 运行期绑定的 Angelica（`mod/gtnh/dependencies.gradle:20` 的 `angelica: "2.2.16"`）。
+ * 下面三处行号取**该绑定版本**（本机 `D:\github\gtnh\Angelica` 仓有 `2.2.16` 标签，
+ * 用 `git show 2.2.16:<file>` 核对；本地仓 HEAD 是另一条线（2.0.0-alpha21），语义相同、
+ * 行号不同，故不以 HEAD 为基线）：
  *
- * | Angelica 事实 | 位置（本地仓 HEAD） | 含义 |
+ * | Angelica 2.2.16 事实 | 位置 | 含义 |
  * |---|---|---|
- * | `CUTOUT_MIPPED_PASS`：`pass 0` + `fragmentDiscard(true)` + `AlphaCutoffParameter.ONE_TENTH` + **写深度** | `AngelicaRenderPassConfiguration.java:53-57,68` | 二值 alpha ⇒ alphaTest + 深度即几何 |
- * | `TRANSLUCENT_PASS`：`pass 1` + `useTranslucencySorting(true)` | 同上 `:59-64` | 真半透明 ⇒ **排序**（画家算法），不是"顺序随批次" |
- * | 声明 TRANSLUCENT 但贴图透明度等级 ≠ TRANSLUCENT ⇒ **降级为 CUTOUT_MIPPED** | `AngelicaChunkBuildContext.java:105-106` | 二值 alpha 的"玻璃"在游戏里实际走 cutout |
+ * | `CUTOUT_MIPPED_PASS`：`pass 0` + `fragmentDiscard(true)`；`CUTOUT_MIPPED_MATERIAL` 的 cutoff = `AlphaCutoffParameter.HALF`（**0.5**）；pipeline 里 `glAlphaFunc(GL_GREATER, HALF.cutoff())` | `AngelicaRenderPassConfiguration.java:54-58,69,107` | 二值 alpha ⇒ alphaTest（0.5）+ 深度即几何 |
+ * | `TRANSLUCENT_PASS`：`pass 1` + `useReverseOrder(true)` + `useTranslucencySorting(true)` | 同上 `:60-65` | 真半透明 ⇒ **排序**（画家算法），不是"顺序随批次" |
+ * | 声明 TRANSLUCENT 但贴图透明度等级 ≠ TRANSLUCENT ⇒ **降级为 CUTOUT_MIPPED_MATERIAL**（`OPAQUE` 也一样：该分支只看"≠ TRANSLUCENT"） | `AngelicaChunkBuildContext.java:117-125` | 二值 alpha 的"玻璃"在游戏里实际走 cutout |
+ *
+ * 两条**已知且有意**的取舍（写在这里，避免"实现与引用看起来逐字对齐"的假象）：
+ *
+ * 1. 游戏侧的降级只在该 sprite **没有动画元数据**时生效（`!sprite.hasAnimationMetadata()`，
+ *    `:118`）。web 侧按本判据的既定口径对**整幅**（含动画竖条）分类 —— 动画条按整幅是
+ *    为了避免"逐帧类别不同 ⇒ 同一材质状态无法确定"；代价是动画 translucent 材质也会被降级
+ *    （二值 alpha 下这一位只影响深度写入，不影响像素可见性）。
+ * 2. 游戏侧还有 `useRenderPassOptimization`/材质包覆盖两个开关；web 侧无对应概念，
+ *    恒按"优化在打开状态"取语义。
  *
  * ⇒ 本模块的判据是三段（不是两段）：
  *
@@ -91,6 +102,7 @@ export function materialPassStateOf(
 ): MaterialPassState {
   if (blend === 'translucent') {
     // Angelica 降级语义：二值（或完全无 alpha）的"半透明"材质实际走 cutout。
+    // `alphaTest: 0.5` 与 2.2.16 的 `AlphaCutoffParameter.HALF` 逐值相等（`AngelicaRenderPassConfiguration.java:69,107`）。
     // `opaque` 也落这一支的理由：贴图没有可裁像素时，"混合 + 不写深度"没有任何收益，
     // 却会丢掉深度裁决 ⇒ 与游戏侧（二值透明度等级 ⇒ CUTOUT_MIPPED）一致。
     if (alphaClass === 'binary' || alphaClass === 'opaque') return CUTOUT_STATE
