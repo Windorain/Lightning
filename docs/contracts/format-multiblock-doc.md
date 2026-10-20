@@ -188,6 +188,20 @@ chamber、对任何 `subIndex ≠ 0` 的面全错，且掩盖了「取错素材�
 `TextureBlobEmbedder` 三处 disk 出口统一调用；判据 `TextureStripCropTest`（判定边界 / 面号来源 /
 像素保真 / 装配守卫）。
 
+**入仓回归闸门（#9 棘轮；用户裁决「把这个场景加入到 E2E 标准场景里面作为棘轮」）**：
+`web/e2e/ic2-texture-strip-ratchet.spec.ts` 用**已入仓的真实导出件**
+（`web/e2e/fixtures/ic2-nuclear-reactor-pair-postfix.json`，runId `20261021-034525-export-scene-10`；
+来源与指纹见同目录 `.provenance.md`）把本节规则钉成两条机械判据：
+
+1. 产物内 4 条 IC2 面号材质的 blob 必须是 **32×32**（`blockNuclearReactor:4`、`blockRTGenerator:10`、
+   `blockLathe:0`、`blockMiner:7`；显式禁止 384×32 / 192×32 整条带），
+   而对照材质 `stone` 16×16、`lava_still` 16×16、`lava_flow` 32×32 **原样**（防过度裁切）；
+2. 经 web 真实装配回放出图（`OPERATOR_OPEN_SCENE` → `OPERATOR_EXPORT_SHOT_PNG`），
+   south/north 机位的黄/黑像素计数与 #9 修复批实测读数（3408/3256、6816/6512）相差 ≤1%。
+
+该 spec 在产物门控（`web/e2e/real-artifact-gate.ts`）里登记为 `committed: true`：入仓件 ⇒ **永不排除**，
+删产物或把裁列逻辑改回整条带 ⇒ 标准套件（`@smoke`）必红。
+
 ---
 
 ## 4. `multiblock` 对象
