@@ -251,3 +251,38 @@ F12 修完后，游戏实拍与 Web 重渲逐机位对比（`temp/pr91-lp-after/
 - 另两张 `PipeModel*`（blob 0/1/2）是 **100×100**（不是 16×16），且**大面积透明**
   （blob 0 = 44.5% 全透明 / blob 1、2 = 34.3%）。是否与游戏侧纹理逐像素一致，**尚未核**；
   现在把它当已知量，不当结论。
+## F16 · GG 反物质外壳（ACC，CTM 玻璃）：成对玻璃的**共享面被画出来**（web 侧已修；导出侧多录另计）
+
+> 用户裁决（2026-10-20）：此前登记为「已知器具层差异」的 ACC 白框，**推翻**为缺陷。
+> 本文件按机械读数逐段记：复现 → 根因 → 修后实测。截图证据在 `temp/pb-fix-translucent/`（临时目录，
+> 结论与读数在本文件；需要长期留存的图按里程碑材料处理）。
+
+### F16.1 复现（本批修复**前**，SHA 7cb442e4）
+
+- **输入**：`temp/pb-refresh-acceptance/export/cp-gg-casing-r2.json`（#87 验收轮真实导出件，14 207 B，
+  sha256 `28621a6ab0257f2ed9eb35aac0e08b8141dcc222af3bb4fdd7f0fa319cf5fe7e`）。
+  本批把它复制成**夹具** `web/e2e/fixtures/gg-antimatter-casing-ctm-glass.json`（逐字节相同），
+  使生产装配判据能吃真实输入（见 F16.3）。
+- **路径**：**产品视口**（`npm run dev`，本树 test slot 5212；`OPERATOR_OPEN_SCENE` 注入 +
+  `main.ensureCamera` 机位 yaw 235 / elev 22 / dist 12 / zoom 2.31 = 5×1×3 的自动 fit 缩放）。
+  首帧取景与用户截图同形（透视斜视、结构占满画面）。
+- **症状 1（邻接面错显）**：成对两格的**中间**浮出一个完整的白框环。
+  截图 `temp/pb-fix-translucent/repro-before/vp-iso-a.png`（sha256 `1e124b02…c4ea6fb`）。
+  游戏实拍同机位 `temp/pb-refresh-acceptance/caserun/shots/ortho-iso.png`（3× 放大版
+  `temp/pb-fix-translucent/repro-before/game-iso-zoom.png`）**没有**这个环：
+  成对的两块合起来只有**外侧框 + 一道中缝**。
+- **症状 2（深度/穿透乱）**：这个环就在共享面上（2 层 × 2 侧 = **同平面 4 片**），斜视时与两侧玻璃互叠，
+  看起来"互相穿透"。**正视图看不见它**：共享面与世界 x 面平行，`front`/`back` 机位里它退化成正投影线
+  —— 这解释了历轮 `front`/`back` 的 `seam-glass-pair` 判据一直绿（判据位置对、可见性不对）。
+- **症状 3（web 白框 / 游戏深框）**：**不是玻璃专属**，同图逐像素比可见它是**整体**亮度差：
+
+  | 采样 | 游戏 | web | 比值 |
+  |---|---|---|---|
+  | 石料纹素（同一行同一列） | 89–100 | 127–143 | ≈0.70 |
+  | 玻璃黑倒角 | 25 | 34 | ≈0.74 |
+  | 玻璃白框（贴图原色 242,247,252） | 163–171 | 233–245 | ≈0.70 |
+
+  ⇒ 游戏侧把整幅乘了光图（web 侧 `MeshBasicMaterial` 无光照）；贴图白框本色就是近白（242,247,252），
+  不是 web 把它画错了颜色。而导出件的逐顶点 `brightness` 对这些面**恒为 `0xF00000`**
+  （MC 打包：`sky<<20 \| block<<4` ⇒ sky 15 / block 0 = 满亮度）⇒ **只吃导出件无法复原那 0.70**。
+  这属已登记的「光照模型（另立特性）」，`expect/*.json` 的 `normalize: per-face-luminance` 也据此只比色度。
