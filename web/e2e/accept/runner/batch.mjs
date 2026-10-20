@@ -84,13 +84,6 @@ export function caseForScene(scene, plan) {
     { action: 'cmd.exec', params: { command: '/sde pos2' } },
     { action: 'cmd.exec', params: { command: '/sde start' } },
     { action: 'cmd.exec', params: { command: '/sde setframe 0' } },
-    // 捕获前置：把选区里 TE 的状态重新下发给客户端。托管世界是直接写服务端搭出来的，依赖
-    // 「邻居变化才重算才下发」的模组（LP 管道）客户端会永久停在空状态 ⇒ 导出里管道只剩管体、
-    // 没有连接臂与 -status/-inactive 层（main 实测）。world.resync 只重发方块更新包，不改世界。
-    { action: 'world.resync', params: { from: sel.from, to: sel.to } },
-    // 包投递在下一 tick 才发生：给两个空步买 tick（setframe 幂等，不改变任何状态）。
-    { action: 'cmd.exec', params: { command: '/sde setframe 0' } },
-    { action: 'cmd.exec', params: { command: '/sde setframe 0' } },
     { action: 'cmd.exec', params: { command: '/sde record' } },
   ].map((a, i) => ({ ...a, path: `action/${i}-${a.action}.json` }))
 
