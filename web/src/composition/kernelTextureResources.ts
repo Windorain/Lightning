@@ -46,6 +46,7 @@ import {
 import { bindTexture } from '@/presentation/textureBinding'
 import type { TextureBinding, TexturePixels, TextureResource, TextureSampling, TextureState } from '@/presentation/textureBinding'
 import { textureAnimationOf, type TextureAnimationBinding } from '@/domain/textureAnimation'
+import { textureAlphaClassOf, type TextureAlphaClass } from '@/domain/textureAlphaClass'
 
 /** 五态的**声明式**取值（不是本模块发明 —— 逐字来自 #249 §19.3）。 */
 export const TEXTURE_STATES: readonly TextureState[] = Object.freeze([
@@ -153,7 +154,9 @@ async function decodeOne(r: ContentResource, decoder: TextureDecoder): Promise<T
   try {
     const pixels = await decoder.decode(r.payload)
     if (pixels === null) {
-      return freezeResource(identity, locator, 'failed', null, undefined, '解码返回 null（字节不是可解码图像）')
+      return freezeResource(identity, locator, 'failed', null, {
+        failure: '解码返回 null（字节不是可解码图像）',
+      })
     }
     // ③ 就绪 ⇒ 由「声明 + 像素尺寸」派生纹理序列（#M5-3）。
     // 未解码/失败 ⇒ 缺席（没有像素就没有格数可推，**不猜**帧数）。
@@ -167,9 +170,14 @@ async function decodeOne(r: ContentResource, decoder: TextureDecoder): Promise<T
       width: pixels.width,
       height: pixels.height,
     })
-    return freezeResource(identity, locator, 'ready', pixels, animation ?? undefined)
+    // ④ 就绪 ⇒ 由**同一份像素**派生 alpha 类别（#87 修复轮 3）。
+    // 这是分类的**唯一生产点**：两条渲染链（presenter 与旧图标链）都只消费这个结果，
+    // 不各自再扫一遍字节（第二份实现必然漂移，而漂移在这里的表现是"同贴图两条链画得不一样"）。
+    // 分类是纯函数且不会抛（非法输入答 `partial`），故不影响"坏一张只坏一张"的失败语义。
+    const alphaClass = textureAlphaClassOf(pixels)
+    return freezeResource(identity, locator, 'ready', pixels, { animation: animation ?? undefined, alphaClass })
   } catch (e) {
-    return freezeResource(identity, locator, 'failed', null, undefined, formatReason(e))
+    return freezeResource(identity, locator, 'failed', null, { failure: formatReason(e) })
   }
 }
 
@@ -273,27 +281,41 @@ function locatorOf(r: ContentResource): AssetLocator {
   return Object.freeze({ kind: 'external' as const, url: r.ref.url })
 }
 
+/** `freezeResource` 的可选派生字段（**只在场时展开**；见函数说明）。 */
+interface ResourceDerivations {
+  readonly animation?: TextureAnimationBinding
+  /** 贴图 alpha 类别（**只在 `ready` 时给**；见 `TextureResource#alphaClass`）。 */
+  readonly alphaClass?: TextureAlphaClass
+  readonly failure?: string
+}
+
 /**
  * 冻结一条五态资源。
  *
- * `animation` **只在有值时展开**（与 `phaseOf` 的"缺席就是缺席"同一纪律）：
- * 静态贴图不得写出 `animation: undefined` 的在场字段 —— 保留两种形状会让
- * `Object.keys`/`toStrictEqual` 类断言与"缺席 = 静态"的口径分叉。
+ * 三个派生字段 **只在有值时展开**（与 `phaseOf` 的"缺席就是缺席"同一纪律）：
+ * 静态贴图不得写出 `animation: undefined`、未解码不得写出 `alphaClass: undefined` ——
+ * 保留两种形状会让 `Object.keys`/`toStrictEqual` 类断言与"缺席 = 不知道"的口径分叉。
+ *
+ * 形参从"一大串位置参数"改成 `ResourceDerivations`：三个可选字段挨在一起时，
+ * 位置调用容易把 `alphaClass` 与 `failure` 传反（类型上都是可选字符串/对象，不易察觉）。
  */
 function freezeResource(
   identity: ContentIdentity,
   locator: AssetLocator,
   state: TextureState,
   pixels: TexturePixels | null,
-  animation?: TextureAnimationBinding,
-  failure?: string,
+  derivations: ResourceDerivations = {},
 ): TextureResource {
+  const { animation, alphaClass, failure } = derivations
   return Object.freeze({
     identity,
     locator,
     state,
     pixels,
     ...(animation === undefined ? {} : { animation }),
+    // `pixels === null` 时类别**必然**缺席（没有像素就没有可派生的类别）：
+    // 这里显式挡住"调用方误传"，而不是静默产出一个自相矛盾的资源。
+    ...(alphaClass === undefined || pixels === null ? {} : { alphaClass }),
     ...(failure === undefined ? {} : { failure }),
   }) as TextureResource
 }
@@ -376,6 +398,8 @@ export function textureBindingsOf(input: {
         state: resource.state,
         // 序列只在就绪时派生（见 `decodeOne`）；缺席 ⇒ 绑定不带 animation。
         ...(resource.animation === undefined ? {} : { animation: resource.animation }),
+        // alpha 类别同理：只在就绪时在场 ⇒ 绑定才带 `alphaClass`（缺席 = 未知）。
+        ...(resource.alphaClass === undefined ? {} : { alphaClass: resource.alphaClass }),
       },
       input.sampling,
     )

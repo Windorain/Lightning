@@ -16,7 +16,7 @@ import {
 import { TooltipEditOperator } from '@/operators/builtin/metaEditOperators'
 import { NewSceneOperator, OpenSceneOperator, SaveFileOperator, LoadBuiltinSceneOperator, SaveProjectOperator, OpenProjectOperator } from '@/operators/builtin/docLifecycleOperators'
 import { SDEConnectOperator, SDELoadExportOperator, SDELoadWorkspaceOperator, SDEPushOperator } from '@/operators/builtin/sdeOperators'
-import { ExportPlainOperator, ExportEnvelopeOperator, ExportObjOperator, ExportIsoPngOperator, ExportSceneGifOperator } from '@/operators/builtin/exportOperators'
+import { ExportPlainOperator, ExportEnvelopeOperator, ExportObjOperator, ExportIsoPngOperator, ExportSceneGifOperator, ExportShotPngOperator } from '@/operators/builtin/exportOperators'
 import { AnnotationCreateOperator, AnnotationUpdateOperator, AnnotationDeleteOperator } from '@/operators/builtin/annotationOperators'
 import {
   SetFrameIndexOperator, ToggleFramePlaybackOperator, SetFramePlaybackOperator, SetHoveredBlockOperator, SetHoveredAnnotationOperator,
@@ -79,6 +79,9 @@ const WORKBENCH_OPERATORS: OperatorType[] = [
   SetWorkspaceModeOperator, ResetLayoutOperator,
   SDEConnectOperator, SDELoadExportOperator, SDELoadWorkspaceOperator, SDEPushOperator,
   ExportPlainOperator, ExportEnvelopeOperator, ExportObjOperator, ExportIsoPngOperator, ExportSceneGifOperator,
+  // #87 验收器具：指定正交机位出图（MC 控制面 CameraSpec 口径；走同一条捕获/作业链）。
+  // 不在产品面板展示 —— 由 e2e / 脚本以 operator id 直接调。
+  ExportShotPngOperator,
   ThemeToggleOperator, SetLanguageOperator,
   AnnotationCreateOperator, AnnotationUpdateOperator, AnnotationDeleteOperator,
   AnnotationBoxCommitOperator, AnnotationBoxResetOperator,

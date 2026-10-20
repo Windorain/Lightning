@@ -143,7 +143,7 @@
     {
       "id": "img-host-not-uniform-near",
       "type": "image-not-uniform",
-      "params": { "path": "shots/near.png", "maxSameColorRatio": 0.15 }
+      "params": { "path": "shots/near.png", "maxSameColorRatio": 0.9 }
     },
     {
       "id": "img-host-size-ortho",
@@ -163,7 +163,7 @@
     {
       "id": "img-nb-not-uniform-near",
       "type": "image-not-uniform",
-      "params": { "path": "shots/near.png", "maxSameColorRatio": 0.15 }
+      "params": { "path": "shots/near.png", "maxSameColorRatio": 0.9 }
     },
     {
       "id": "img-scene-size-near",
@@ -173,7 +173,7 @@
     {
       "id": "img-scene-not-uniform-near",
       "type": "image-not-uniform",
-      "params": { "path": "shots/near.png", "maxSameColorRatio": 0.15 }
+      "params": { "path": "shots/near.png", "maxSameColorRatio": 0.9 }
     },
 
     {

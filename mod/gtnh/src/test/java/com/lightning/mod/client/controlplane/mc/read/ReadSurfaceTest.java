@@ -215,15 +215,31 @@ public class ReadSurfaceTest {
         net.minecraft.nbt.NBTTagCompound tag = new net.minecraft.nbt.NBTTagCompound();
         tag.setByteArray("conModes", new byte[] { 1, 1, 2, 3 });
         tag.setIntArray("externalConnections", new int[] { 4, 5 });
-        JsonObject v = ReadSupport.nbtSummary(tag, 4, 32).getAsJsonObject("value").getAsJsonObject("members");
-        JsonArray bytes = v.getAsJsonObject("conModes").getAsJsonArray("values");
-        JsonArray ints = v.getAsJsonObject("externalConnections").getAsJsonArray("values");
-        assertEquals(4, bytes.size());                 // byte 数组应逐元素给值
-        assertEquals(1, bytes.get(0).getAsInt());
-        assertEquals(3, bytes.get(3).getAsInt());
-        assertEquals(2, ints.size());                  // int 数组应逐元素给值
-        assertEquals(4, ints.get(0).getAsInt());
-        assertEquals(5, ints.get(1).getAsInt());
+        JsonObject v = ReadSupport.nbtSummary(tag, 4, 32)
+            .getAsJsonObject("value")
+            .getAsJsonObject("members");
+        JsonArray bytes = v.getAsJsonObject("conModes")
+            .getAsJsonArray("values");
+        JsonArray ints = v.getAsJsonObject("externalConnections")
+            .getAsJsonArray("values");
+        assertEquals(4, bytes.size()); // byte 数组应逐元素给值
+        assertEquals(
+            1,
+            bytes.get(0)
+                .getAsInt());
+        assertEquals(
+            3,
+            bytes.get(3)
+                .getAsInt());
+        assertEquals(2, ints.size()); // int 数组应逐元素给值
+        assertEquals(
+            4,
+            ints.get(0)
+                .getAsInt());
+        assertEquals(
+            5,
+            ints.get(1)
+                .getAsInt());
     }
 
     // ------------------------------------------------------------ diff 种类

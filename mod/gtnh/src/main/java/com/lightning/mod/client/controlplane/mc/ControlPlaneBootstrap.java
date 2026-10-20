@@ -39,6 +39,7 @@ import cpw.mods.fml.common.FMLCommonHandler;
  * → JobRegistry → JobQueue.setStepper(ActionSteppingExecutor) → Router → CoreEndpoints.registerAll()
  * → ControlPlaneServer.start() → setShutdownCleanup(#166 进程退出尽力释放) → installShutdownHook()
  * → 注册 ControlPlaneTickHandler 到 FML 总线
+ * → 注册 ServerBuildPump（服务端 tick 线程推进场景构建，#89 评论 1689）
  * </pre>
  *
  * <p>
@@ -255,6 +256,13 @@ public final class ControlPlaneBootstrap {
             .bus()
             .register(handler);
         tickHandler = handler;
+
+        // 场景构建泵（#89 根治，评论 1689）：把 SceneBuilder 的逐 tick 推进搬到服务端 tick 线程
+        // （ServerTickEvent / Phase.END）。控制面是客户端独占装配，本注册只在这里发生一次；
+        // 单例保证两个入口（case.run 的 build 段、world.rebuild 的 BUILD 段）共用同一个槽位。
+        FMLCommonHandler.instance()
+            .bus()
+            .register(ServerBuildPump.instance());
 
         CpLog.info(
             "控制面已启用：http://%s:%d%s（dataDir=%s，token 见 tokens.json）",

@@ -40,6 +40,7 @@ import type { AssetNeedDerivation, CaptureInput } from '@/application/exportPlan
 import { captureFactsOfBindings, deriveAssetNeeds, planExportRequest, type ExportCaptureFacts } from '@/application/exportPlan'
 import type { EvaluationKey, PresentationInputs } from '@/presentation/evaluationKey'
 import { isoCameraSpecsOf, type IsoExportBounds } from '@/presentation/isoExportCamera'
+import { shotCameraSpecOf, type ShotPlacement } from '@/presentation/shotCamera'
 import { compileScene, materialDescriptorsOf } from '@/presentation/compileScene'
 import type { TextureResource } from '@/presentation/textureBinding'
 import { AssetStateStore } from '@/presentation/assetState'
@@ -64,12 +65,37 @@ export interface ExportCaptureSource {
 
 export type ExportCaptureKind = 'image' | 'animation'
 
+/** 验收器具的**显式机位**捕获（#87 §2.2 三对齐；与等轴四向互斥）。 */
+export interface ShotCaptureOptions extends ShotPlacement {
+  /** 产物宽（像素整数；任意比例，不强制正方）。 */
+  readonly width: number
+  /** 产物高（像素整数；任意比例，不强制正方）。 */
+  readonly height: number
+  /**
+   * 底色（整型色 `0xRRGGBB` 或 `'transparent'`；缺省透明，与产品导出同义）。
+   *
+   * 器具要"非空白"这类**像素级**判据，透明底会让"空像素"与"内容像素"在解码后
+   * 难以区分（`getImageData` 的 RGB 都是 0）——故器具显式给不透明天空底。
+   */
+  readonly background?: number | 'transparent'
+}
+
 export interface ExportCaptureOptions {
   readonly kind: ExportCaptureKind
-  /** 等轴方向 0..3（调用方已归一 —— 本模块不静默夹取）。 */
-  readonly directionIndex: number
-  /** 渲染边长（像素）。**形参搬运**：缺省值属于命令侧（Q1/M6-5 未统一），本模块不写死。 */
-  readonly pixelSize: number
+  /** 等轴方向 0..3（调用方已归一 —— 本模块不静默夹取）。给 `shot` 时**不读**。 */
+  readonly directionIndex?: number
+  /**
+   * 渲染边长（像素；正方）。**形参搬运**：缺省值属于命令侧（Q1/M6-5 未统一），本模块不写死。
+   * 给 `shot` 时由 `shot.width/height` 取代（任意比例）。
+   */
+  readonly pixelSize?: number
+  /**
+   * **显式正交机位**（验收器具）：相对内容包围盒中心的落点 + 正交竖直全高 + 任意分辨率。
+   *
+   * 给定时相机**不再**来自等轴四向表，而是 {@link shotCameraSpecOf} 算出的一个冻结值
+   * ——仍然走同一条捕获/冻结/作业链，不新增渲染入口。SPEC §9:297「导出相机是固定值」。
+   */
+  readonly shot?: ShotCaptureOptions
   /** 仅 `kind === 'image'`：场景秒（缺省 0 由调用方归一后传入）。 */
   readonly seconds?: number
   /** 纹理解码器（注入；本模块不碰 DOM）。 */
@@ -246,11 +272,49 @@ export async function captureExportSnapshot(
 
   const bounds = unionBoundsOf(compiled.value.plans)
   const cameras = isoCameraSpecsOf({ bounds })
-  if (!Number.isInteger(options.directionIndex) || options.directionIndex < 0 || options.directionIndex > 3) {
-    return err(unsupportedOperation({ reason: 'exportCaptureDirectionInvalid', direction: options.directionIndex }))
+
+  /**
+   * 取景二选一（**同一份**捕获链，不新增渲染入口）：
+   *  - 等轴四向：`directionIndex` 索引上面那四个值（产品命令）；
+   *  - 验收器具：显式机位 = 相对内容包围盒中心的落点 + 正交竖直全高（#87 三对齐）。
+   */
+  let camera: CameraSpec
+  let cameraLabel: string
+  let render: RenderSettings
+  if (options.shot !== undefined) {
+    const shot = shotCameraSpecOf(bounds, {
+      offset: options.shot.offset,
+      orthoHeight: options.shot.orthoHeight,
+    })
+    if (!shot.ok) return err(shot.error)
+    camera = shot.value
+    cameraLabel = 'shot'
+    const { width, height } = options.shot
+    if (!Number.isInteger(width) || width <= 0 || !Number.isInteger(height) || height <= 0) {
+      return err(
+        unsupportedOperation({ reason: 'exportCaptureRenderSizeInvalid', width, height }),
+      )
+    }
+    render = { width, height, background: options.shot.background ?? 'transparent' }
+  } else {
+    const directionIndex = options.directionIndex
+    if (
+      directionIndex === undefined ||
+      !Number.isInteger(directionIndex) ||
+      directionIndex < 0 ||
+      directionIndex > 3
+    ) {
+      return err(
+        unsupportedOperation({ reason: 'exportCaptureDirectionInvalid', direction: String(directionIndex) }),
+      )
+    }
+    if (options.pixelSize === undefined) {
+      return err(unsupportedOperation({ reason: 'exportCapturePixelSizeMissing' }))
+    }
+    camera = cameras[directionIndex]!
+    cameraLabel = 'iso-' + String(directionIndex)
+    render = { width: options.pixelSize, height: options.pixelSize, background: 'transparent' }
   }
-  const camera = cameras[options.directionIndex]!
-  const render: RenderSettings = { width: options.pixelSize, height: options.pixelSize, background: 'transparent' }
 
   // ⑥ 时间序列（GIF：逐帧驻留来自声明；PNG：单帧在 `seconds`）。
   const loop = options.kind === 'animation'
@@ -267,7 +331,7 @@ export async function captureExportSnapshot(
     frameCount,
     mapping,
     channels: snap.channels,
-    camera: { kind: 'view', label: 'iso-' + String(options.directionIndex), view: camera },
+    camera: { kind: 'view', label: cameraLabel, view: camera },
     render,
     animation: snap.animation,
   }
@@ -285,7 +349,9 @@ export async function captureExportSnapshot(
   }
 
   const init: CaptureInput = {
-    requestId: options.requestId ?? 'export-' + options.kind + '-' + String(options.directionIndex),
+    requestId:
+      options.requestId ??
+      'export-' + options.kind + '-' + (options.shot === undefined ? String(options.directionIndex) : 'shot'),
     now: options.now,
     documentId: snap.scene.id,
     version: snap.version,

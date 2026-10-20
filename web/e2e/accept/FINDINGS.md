@@ -251,3 +251,143 @@ F12 修完后，游戏实拍与 Web 重渲逐机位对比（`temp/pr91-lp-after/
 - 另两张 `PipeModel*`（blob 0/1/2）是 **100×100**（不是 16×16），且**大面积透明**
   （blob 0 = 44.5% 全透明 / blob 1、2 = 34.3%）。是否与游戏侧纹理逐像素一致，**尚未核**；
   现在把它当已知量，不当结论。
+## F16 · GG 反物质外壳（ACC，CTM 玻璃）：成对玻璃的**共享面被画出来**（web 侧已修；导出侧多录另计）
+
+> 用户裁决（2026-10-20）：此前登记为「已知器具层差异」的 ACC 白框，**推翻**为缺陷。
+> 本文件按机械读数逐段记：复现 → 根因 → 修后实测。截图证据在 `temp/pb-fix-translucent/`（临时目录，
+> 结论与读数在本文件；需要长期留存的图按里程碑材料处理）。
+
+### F16.1 复现（本批修复**前**，SHA 7cb442e4）
+
+- **输入**：`temp/pb-refresh-acceptance/export/cp-gg-casing-r2.json`（#87 验收轮真实导出件，14 207 B，
+  sha256 `28621a6ab0257f2ed9eb35aac0e08b8141dcc222af3bb4fdd7f0fa319cf5fe7e`）。
+  本批把它复制成**夹具** `web/e2e/fixtures/gg-antimatter-casing-ctm-glass.json`（逐字节相同），
+  使生产装配判据能吃真实输入（见 F16.3）。
+- **路径**：**产品视口**（`npm run dev`，本树 test slot 5212；`OPERATOR_OPEN_SCENE` 注入 +
+  `main.ensureCamera` 机位 yaw 235 / elev 22 / dist 12 / zoom 2.31 = 5×1×3 的自动 fit 缩放）。
+  首帧取景与用户截图同形（透视斜视、结构占满画面）。
+- **症状 1（邻接面错显）**：成对两格的**中间**浮出一个完整的白框环。
+  截图 `temp/pb-fix-translucent/repro-before/vp-iso-a.png`（sha256 `1e124b02…c4ea6fb`）。
+  游戏实拍同机位 `temp/pb-refresh-acceptance/caserun/shots/ortho-iso.png`（3× 放大版
+  `temp/pb-fix-translucent/repro-before/game-iso-zoom.png`）**没有**这个环：
+  成对的两块合起来只有**外侧框 + 一道中缝**。
+- **症状 2（深度/穿透乱）**：这个环就在共享面上（2 层 × 2 侧 = **同平面 4 片**），斜视时与两侧玻璃互叠，
+  看起来"互相穿透"。**正视图看不见它**：共享面与世界 x 面平行，`front`/`back` 机位里它退化成正投影线
+  —— 这解释了历轮 `front`/`back` 的 `seam-glass-pair` 判据一直绿（判据位置对、可见性不对）。
+- **症状 3（web 白框 / 游戏深框）**：**不是玻璃专属**，同图逐像素比可见它是**整体**亮度差：
+
+  | 采样 | 游戏 | web | 比值 |
+  |---|---|---|---|
+  | 石料纹素（同一行同一列） | 89–100 | 127–143 | ≈0.70 |
+  | 玻璃黑倒角 | 25 | 34 | ≈0.74 |
+  | 玻璃白框（贴图原色 242,247,252） | 163–171 | 233–245 | ≈0.70 |
+
+  ⇒ 游戏侧把整幅乘了光图（web 侧 `MeshBasicMaterial` 无光照）；贴图白框本色就是近白（242,247,252），
+  不是 web 把它画错了颜色。而导出件的逐顶点 `brightness` 对这些面**恒为 `0xF00000`**
+  （MC 打包：`sky<<20 \| block<<4` ⇒ sky 15 / block 0 = 满亮度）⇒ **只吃导出件无法复原那 0.70**。
+  这属已登记的「光照模型（另立特性）」，`expect/*.json` 的 `normalize: per-face-luminance` 也据此只比色度。
+### F16.2 根因：(a)–(d) 逐条判定（代码级 + 读数）
+
+| 假设 | 判定 | 证据 |
+|---|---|---|
+| (a) 材质水合/装配链没把 `blend` 送到 `materialPassStateOf` 的消费点 | **证伪** | 生产链完整：`content.resources[].blend` → `runtime/presentationAdapter#structureMaterialGroups`（`asBlend`）→ `MaterialDescriptor.blend` → `presentation/presenter#createMaterial` → `materialPassStateOf`。判据 ④（真实信封）断言 ACC 两组材质 `blend==='translucent'` 且 pass 状态 `{transparent:true, alphaTest:0, depthWrite:false}`。若这条断了，玻璃中心会像 F2 那样**不透**，与现场（中心确实透出天空）不符。 |
+| (b) 同一面多片 translucent quad 的绘制顺序 | **存在，但非本场景根因** | 事实：`structureMaterialPrimitives` 把**全场景同 `materialIndex` 的四边形并进一个 geometry**（本件只有两个半透明批次），且 `transparency` 恒为 `null` ⇒ 组内绘制顺序 = 采集顺序（`z,row,col`），three 的透明排序只作用于 object。但本场景的可见错显**全部**由 (c) 造成（修后同机位与游戏一致）；重叠的几片是同一平面同一贴图、α 只有 {0,255}（贴图直方图：`242..,255` 与 `0,0,0,0` 两类），同色叠加换序不改结果。真正的顺序风险属"不同深度上互遮的半透明面"，MC 同 pass 也不做三角形级排序 ⇒ 按 MC 保真口径不新造排序机制（列残余风险）。 |
+| (c) 合面/邻接面合并对 translucent 的交互 | **证实 = 根因** | `render/mesh/structureGeometryCore` 判"邻格是不是同一方块"用的是 **palette 下标相等**（旧 `nidx === paletteIndex`，函数名 `shouldCullQuadFacingSamePaletteNeighbor`）。本件成对两格是 `blockPalette[2]` / `blockPalette[3]`（同 `registryId`、同 meta 0、无 facing/nbt，只是 CTM 象限贴图互为镜像）⇒ 判成"不同方块" ⇒ 共享面留在几何里。生产读数（真实信封 → 内核 → 投影 → 生产收集器）：关掉剔除 **102** 片 / 开剔除 **96** 片，差额 **6** = 成对共享面 **4**（每面 2 层 × 2 侧）+ magneticFlux↔gravityStabilization 的**不透明**邻面 2（另一条规则）。 |
+| (d) 视口路径与离屏导出路径不一致 | **证伪** | 两侧同源：视口走 `composition/kernelPresentationInputs → runtime/presentationAdapter#structureMaterialPrimitives → collectStructureGeometryPiecesPure`；`OPERATOR_EXPORT_SHOT_PNG` 走同一 presenter/`compileScene`（差异只在机位与读回）。实测同一份导出件：**修前**的离屏 `ortho-iso`（`temp/pb-refresh-acceptance/web/web/ortho-iso.png`）与**修前**的视口截图（`repro-before/vp-iso-a.png`）都出现同一道共享面框环 ⇒ 一条路径上不存在另一条没有的问题。 |
+
+**游戏侧锚点（版本已双核）**：`goodgenerator.blocks.regularBlock.BlockFrame`（运行期绑定 5.09.54.194 的
+`GT5-Unofficial-5.09.54.194-dev.jar`，`javap -c` 复核字节码）：`isOpaqueCube()=false`、
+`getRenderBlockPass()=1`、`renderAsNormalBlock()=false`，`shouldSideBeRendered()` 为
+`getBlock(x,y,z) instanceof BlockFrame ? false : super…`（`instanceof` + `iconst_0 ireturn` 分支在字节码里可见）。
+本地源码仓 HEAD 是 `5.09.52.525`（与运行期不同版本）⇒ 语义与符号按 **jar** 为准复核，源码只作可读参照。
+⇒ **游戏侧剔除同块邻面**，判据是方块身份而非渲染变体；web 用调色板槽位当身份 ⇒ 同一方块的两个烘焙变体之间不剔除。
+
+**修复落点**（机制级，非 ACC 专属）：`structureGeometryCore` 把"同一方块"的判据改为**方块状态**相等
+（`registryId` + `meta` + `facing` + `nbt`，即 `VoxelState` 的四个字段 —— `render/data/grid#buildVoxelVolume` 还原的那一套），
+不对任何方块类型写特判。取"同状态"而非 MC 的 `instanceof` 是**保守**选择：不改变既有夹具的剔除结果
+（`domain/blockGeometry` 记的 `4882 → 4862` 那条历史观测仍成立），偏差方向只会"多画"，不会画出空洞。
+### F16.3 修后实测（同一导出件、同一批机位）
+
+| 项 | 读数 |
+|---|---|
+| 生产装配读数 | 剔除总量 102 → **96** 片；成对两格各 **34** 片（未剔除各 36）；Δ=6 = 共享面 4（2 层 × 2 侧）+ 不透明邻面 2 |
+| 视口（同机位 yaw 235 / elev 22 / dist 12 / zoom 2.31） | 共享面白框环**消失**：成对玻璃回到"外侧框 + 一道中缝"，与游戏实拍同形（`repro-after2/vp-iso-a.png`） |
+| 六轴器具（`shot-ortho.spec.ts`，port 5212） | `1 passed`，6 机位 1280×720；输出 `temp/pb-fix-translucent/web/` |
+| 修前/修后**逐像素**（同机位、同输入、只换代码） | `south` / `north` / `east` / `west` / `top`：**0 px 差**；`iso`：**2667 px 差**（maxd 224，差异区域 72×122@495,280 = 共享面处）—— 修复的作用面精确等于"只有斜视看得见的共享面" |
+| 三对齐目验（`sbs/sbs-ortho-*.png`，左=游戏实拍 / 右=web 修后） | `iso` 与游戏同形（成对=外侧框+中缝，孤立 ACC 六面框完整）；其余五机位与修前逐像素相同（游戏侧差异仍是已登记的整体亮度与底色常量） |
+| 3× 放大三方对照 | `sbs/zoom-iso-game-prefixweb-postfixweb.png`（左=游戏 / 中=web 修前 / 右=web 修后）：修前中间多出共享面框环，修后与游戏一致 |
+| L0 | `npm run typecheck`：仅 4 条既有登记错误（#407）；`npm run arch:scan`：**PASS（0 finding）** |
+| L1 | `npm test`：**3145 passed / 1 failed**（唯一红 `partMaskEnvelopeExemption` 为既有：缺 mod 侧脚本）；`npm run test:arch`：**265 passed / 5 skipped / 0 failed**（270） |
+| L2 | `PLAYWRIGHT_PORT=5212 npm run test:e2e:smoke`：**26 passed / 0 failed / 2 skipped**，墙钟 26.3 s（预算 120 s 硬限） |
+| L3 | **未跑**（未获授权） |
+
+**残余差异（都不是本缺陷）**：① 整体亮度：游戏乘光图、web 无光照（本篇 F16.1 已量化 ≈0.70，属"光照模型"另立特性）；
+② 底色常量 `#BCD5FF` vs `#9EC6E8`（已登记）；③ `ortho-top` 游戏侧那块大白面（已登记）。
+
+### F16.4 捕获侧判定：共享面**确实多录**了（建议另立单，不在本批范围）
+
+- **读数**：同一份导出件里，成对两格朝共享面的四边形**都在**（左格 `+x` 2 片、右格 `-x` 2 片，每面 2 层）。
+- **游戏侧行为**：`BlockFrame#shouldSideBeRendered` 在邻格是 `BlockFrame` 时**返回 false**
+  （运行期 jar 5.09.54.194 `javap -c` 复核：`getBlock(...) instanceof BlockFrame` + `iconst_0 ireturn`）
+  ⇒ 游戏**从不发**这个面。
+- **判定**：导出侧**多录**（捕获未按 `shouldSideBeRendered` 剔除同块邻面）。**建议另立捕获侧单**
+  同批核实两件事：(a) 同块邻面剔除；(b) 每面 **2 层完全相同的四边形**（位置/UV/材质/brightness 逐字段同，
+  实测每格 36 = 2 × 18）——本批**不判**它是缺陷：若游戏确实两遍渲染则是忠实记录，若是重复录制则是捕获缺陷；
+  两种情况下对本批症状都无影响（贴图 α 只有 {0,255}，叠两遍不变色），但对**真半透明**贴图会双重混合。
+- **为什么 web 侧仍必须修**：捕获多录只是"多给了面"，而"该不该画"是渲染期的判据（游戏在渲染期剔除）；
+  消费端不得依赖捕获端预先剔除（OBJ 导出、其他消费端同样吃这份数据）。⇒ 两侧各自成立，web 侧已修并有用例把守。
+
+### F16.5 遗留风险
+
+1. **同一批次内 translucent 三角形的绘制顺序**不是深度序：`structureMaterialPrimitives` 把全场景同 `materialIndex`
+   的四边形并进一个 geometry，`transparency` 恒 `null`（`runtime/presentationAdapter.ts`）⇒ three 的透明排序
+   只作用于 object。本场景无影响（同一平面同一贴图、α∈{0,255}），但"不同深度上互遮的半透明面"仍依赖绘制顺序。
+   MC 同 pass 也不做三角形级排序，故本轮**不新造排序机制**；若将来要与游戏逐像素对齐，这是要单独立项的课题。
+2. **判据偏窄**（有意）：身份取 `registryId+meta+facing+nbt`，比 MC 的 `instanceof` 窄。跨 meta/facing/NBT 的同方块邻面
+   仍会多画（有深度兜底，只在半透明时可见）。要放宽须先有"哪些差异不影响邻面渲染"的证据。
+3. 三条正视图判据（`front`/`back`/`seam-*`）**看不见**这类缺陷（共享面在正视图里退化成线）。
+   以后凡"同块邻面/内部结构"类判据，必须至少含一台**斜视**机位。
+### F16.6 修复轮 3：translucent 深度序 —— 用户斜视机位抓出「远玻璃压近白框」
+
+**症状**（用户验收机位 yaw≈190 / elev≈18，透视）：近处成对玻璃的顶前白框条带内嵌一段暗色条。
+逐像素 + 投影复核证实：那段暗色是**远处独立玻璃块自身底边的斜角**（view-z ≈ −13）叠在**近处白框**
+（view-z ≈ −10.9）之上 —— 远的盖住近的，半透明面之间没有任何深度裁决。
+
+**根因**：同材质 translucent 四边形合并为**一个 Mesh**（实测该场景半透明共 2 个网格、世界坐标均在原点）
+⇒ three 的 object 级 back-to-front 排序失效（网格内三角形走缓冲序）+ translucent 不写深度
+⇒ 绘制顺序 = 批次顺序 ⇒ 后画的远玻璃覆盖先画的近玻璃框。
+
+**对 F16.5(1) 的更正**：旧说「MC 同 pass 也不做三角形级排序」**不精确**。运行期 Angelica **2.2.16**（tag 双核；
+本地仓 HEAD 为 2.0.0-alpha21，行号不同已注明）的实际语义：
+
+- 材质声明 translucent 但纹理是**二值 alpha** ⇒ 降级 `CUTOUT_MIPPED_MATERIAL`（pass 0、alphaTest 0.5、**写深度**）：
+  `AngelicaChunkBuildContext.java:117-125`（`git show 2.2.16` 核对）；cutoff `AlphaCutoffParameter.HALF = 0.5`（:69,:107）。
+- 真·部分透明 ⇒ `TRANSLUCENT_PASS`：`useReverseOrder(true)` + `useTranslucencySorting(true)`（:60-65）。
+- ACC 两张 CTM 贴图 alpha 直方图实测只有 {0,255}（blob1: 0×144/255×112；blob2: 0×192/255×64）⇒ **游戏里 ACC 走 cutout**，
+  深度裁决天然正确 —— 这正是「同一导出件游戏无此症状、web 有」的原因。
+
+**修复**（`77e9cbed`…`9a7d6f3f`）：`materialPassStateOf(blend, alphaClass)` —— translucent + binary|opaque ⇒ cutout 等价
+（alphaTest 0.5 + depthWrite:true）；partial|未知 ⇒ 原画家路径不变。alpha 三态分类（`domain/textureAlphaClass.ts`）在
+`kernelTextureResources#decodeOne` 像素就绪时计算，经 `TextureResource#alphaClass` → `TextureBinding#alphaClass` 送达
+**两个**消费点（`presenter#createMaterial`、旧链 `simpleMaterialLibrary`），类别计入 `materialIdentityOf`（解码前后 map 身份不变、
+只变类别，不进身份会被材质缓存命中旧态 —— 已有 `alphaClassMaterialRebuild.test.ts` 四条判据把守，含「换类别必换材质对象」负对照）。
+LP 管回归保护两半都成立：二值 ⇒ α=0 被 alphaTest 丢弃；真半透明 ⇒ 仍不写深度。
+
+**修后实测**（同一导出件 `deliver/gg-antimatter-casing-fixon-7cb442e4.json`）：
+
+| 项 | 读数 |
+|---|---|
+| 用户机位复拍（5186 视口，修前↔修后同机位逐像素） | 差异精确局限在顺序冲突区（yaw190：320 px @733-754,408-429 = 远玻璃底框压近处结构处）；修后远处暗角不再压近端白框 |
+| 六轴器具（shot-ortho，5212，r3）vs 修复轮 2 web | south/east/west/top/iso **0 px**；north **8 px**（远处贴图白叠近处白、R 差 2，修后取近者 = 方向修正） |
+| 六轴器具 vs 游戏锚点 | 轮廓/遮挡关系维持修复轮 2 已验收口径（整体亮度/底色为已登记差异） |
+| L0 | typecheck 仅既有 4 条（#407）；arch:scan **PASS（0 finding）** |
+| L1 | vitest **3161P/1F**（唯一红为既有 `partMaskEnvelopeExemption`）；本轮定向 4 文件 30/30 |
+| L2 | smoke @5212 **26P/0F/2S**，28.8 s（预算 120 s） |
+| L3 | **未跑**（未获授权） |
+
+**新登记**：① 真·部分透明（partial alpha）translucent 仍无三角形级排序（Angelica 有、我们无）——保留为登记限制，
+需逐像素对齐真半透明时单独立项；② 每面 2 层完全相同四边形在 partial-alpha 下会双重混合（与 #414 同单核实）；
+③ 副发现：presenter 材质释放键与缓存键不一致导致换绑定泄漏（已立 **#415**）。
+
+**两处有意取舍**（写进 `materialPass.ts` 注释）：游戏侧降级只对无动画元数据的 sprite 生效（web 对整幅含动画竖条分类）；
+游戏侧 renderPassOptimization/材质包覆盖两开关 web 无对应概念，恒按「优化打开」取语义。

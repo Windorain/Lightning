@@ -389,7 +389,10 @@ try {
 
         $runTask = if ($UseModernJdk) { 'runClient25' } else { 'runClientSdePipeline' }
         Write-Step "启动客户端（gradlew $runTask --console=plain，日志 $logDir\gradle-runClient.log）"
+        # 追加式注入：保留调用方已设的 JAVA_TOOL_OPTIONS（同 run-anchor.ps1 修复，#89 Lead 裁决）
+        $origJavaToolOptions = $env:JAVA_TOOL_OPTIONS
         $jvmOpts = @()
+        if ($origJavaToolOptions) { $jvmOpts += $origJavaToolOptions }
         if ($UseModernJdk) { $jvmOpts += '-Dfml.queryResult=confirm' }
         if ($EnableViaJvmProperty) {
             $jvmOpts += '-Dsde.controlPlane=on'
@@ -403,7 +406,10 @@ try {
                 -RedirectStandardOutput (Join-Path $logDir 'gradle-runClient.log') `
                 -RedirectStandardError (Join-Path $logDir 'gradle-runClient.log.err')
         } finally {
-            if ($jvmOpts.Count -gt 0) { Remove-Item Env:\JAVA_TOOL_OPTIONS -ErrorAction SilentlyContinue }
+            if ($jvmOpts.Count -gt 0) {
+                if ($null -ne $origJavaToolOptions) { $env:JAVA_TOOL_OPTIONS = $origJavaToolOptions }
+                else { Remove-Item Env:\JAVA_TOOL_OPTIONS -ErrorAction SilentlyContinue }
+            }
         }
         Write-Ok "客户端进程 pid=$($clientProc.Id)"
 

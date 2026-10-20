@@ -610,7 +610,11 @@ try {
 
         $runTask = if ($modernJdk) { 'runClient25' } else { 'runClientSdePipeline' }
         Write-Step "启动客户端（gradlew $runTask --console=plain，日志 $logDir\gradle-runClient.log）"
+        # 追加式注入：保留调用方已设的 JAVA_TOOL_OPTIONS（诊断器具等外部 -D 走这条通道，
+        # 2026-10-07 前整体赋值会丢弃外部值，#89 诊断被迫绕道 _JAVA_OPTIONS；Lead 裁决修复）
+        $origJavaToolOptions = $env:JAVA_TOOL_OPTIONS
         $jvmOpts = @()
+        if ($origJavaToolOptions) { $jvmOpts += $origJavaToolOptions }
         if ($modernJdk) { $jvmOpts += '-Dfml.queryResult=confirm' }
         if ($EnableViaJvmProperty) {
             $jvmOpts += '-Dsde.controlPlane=on'
@@ -624,7 +628,10 @@ try {
                 -RedirectStandardOutput (Join-Path $logDir 'gradle-runClient.log') `
                 -RedirectStandardError (Join-Path $logDir 'gradle-runClient.err')
         } finally {
-            if ($jvmOpts.Count -gt 0) { Remove-Item Env:\JAVA_TOOL_OPTIONS -ErrorAction SilentlyContinue }
+            if ($jvmOpts.Count -gt 0) {
+                if ($null -ne $origJavaToolOptions) { $env:JAVA_TOOL_OPTIONS = $origJavaToolOptions }
+                else { Remove-Item Env:\JAVA_TOOL_OPTIONS -ErrorAction SilentlyContinue }
+            }
         }
         Write-Ok "客户端进程 pid=$($clientProc.Id)"
 

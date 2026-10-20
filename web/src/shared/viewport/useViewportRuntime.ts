@@ -790,6 +790,9 @@ export function useViewportRuntime(opts: UseViewportRuntimeOptions) {
                 height: r.pixels.height,
                 rgba: r.pixels.rgba,
                 name: `${r.identity.id}@${r.identity.version}`,
+                // alpha 类别随像素一起下达（#87 修复轮 3）：它由 `decodeOne` 在**同一份像素**上
+                // 分类，旧链（图标材质库）只消费、不重算。未就绪 ⇒ 字段缺席。
+                ...(r.alphaClass === undefined ? {} : { alphaClass: r.alphaClass }),
               }]
             : [],
         ),

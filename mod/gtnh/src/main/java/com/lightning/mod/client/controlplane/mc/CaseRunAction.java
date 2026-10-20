@@ -650,7 +650,15 @@ public final class CaseRunAction extends SteppingActionBase {
         throw new CpException(ErrorCodes.AUTH_INSUFFICIENT, "含 cameras 段的用例必须 forensic 级调用", context);
     }
 
-    /** {@code build} 段：{@link SceneBuilder}（与 {@code world.rebuild} 的 build 段同一实现）。 */
+    /**
+     * {@code build} 段：{@link SceneBuilder}（与 {@code world.rebuild} 的 build 段同一实现）。
+     *
+     * <p>
+     * <b>驱动线程（#89 根治，评论 1689）</b>：本段不再自己调 {@code builder.tick(world)}，而是把
+     * 构建器交给 {@link ServerBuildPump}（服务端 tick 线程逐 tick 推进），本处只逐 tick
+     * {@link ServerBuildPump#poll()}：阶段名、超时与进度回报语义与改前一致，进度读的是
+     * {@link SceneBuilder} 的 volatile 进度快照。
+     */
     private JsonObject stepBuild(ActionContext ctx) throws Exception {
         JsonObject w = Json.optObject(plan, "world");
         String folder = Json.optString(w, "folder", null);
@@ -660,13 +668,15 @@ public final class CaseRunAction extends SteppingActionBase {
         if (builder == null) {
             builder = new SceneBuilder(steps, folder, seed, true, settle);
             CpLog.info(
-                "case.build 段开始：%s，%d 步，静置 %d tick",
+                "case.build 段开始：%s，%d 步，静置 %d tick（提交到服务端线程执行）",
                 folder,
                 Integer.valueOf(builder.stepCount()),
                 Integer.valueOf(settle));
+            ServerBuildPump.instance()
+                .submit(builder);
         }
-        WorldServer world = WorldRuntime.serverWorld();
-        JsonObject m = builder.tick(world);
+        JsonObject m = ServerBuildPump.instance()
+            .poll();
         if (m == null) {
             int total = Math.max(1, builder.stepCount());
             progress(ctx, 0.4d + 0.3d * ((double) builder.doneSteps() / (double) total), "build");

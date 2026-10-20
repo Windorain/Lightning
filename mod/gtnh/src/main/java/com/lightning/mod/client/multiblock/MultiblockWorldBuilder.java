@@ -492,13 +492,23 @@ public final class MultiblockWorldBuilder {
             r.notes.add("snapshot checkStructure 抛出: " + t);
         }
         r.machineFormed = r.multi.mMachine;
+        /*
+         * 反射调用：GT 5.09.54 重构了结构错误 API（gregtech.api.enums.StructureError 枚举 →
+         * gregtech.api.structure.error 包，MTEMultiBlockBase#getStructureErrors 移除），
+         * 而本树依赖基线可分层（legacy=52.283 / ctm=54.194，见 dependencies.gradle），源码须对两态
+         * 同时可编译。此处是诊断记录（"机器还差什么"），反射拿不到就记一笔跳过，不影响主流程。
+         */
         try {
-            java.util.EnumSet<gregtech.api.enums.StructureError> errs = r.multi.getStructureErrors();
-            if (errs != null) {
-                for (gregtech.api.enums.StructureError e : errs) {
+            java.lang.reflect.Method getErrs = r.multi.getClass()
+                .getMethod("getStructureErrors");
+            Object errs = getErrs.invoke(r.multi);
+            if (errs instanceof Iterable) {
+                for (Object e : (Iterable<?>) errs) {
                     r.structureErrors.add(String.valueOf(e));
                 }
             }
+        } catch (NoSuchMethodException ns) {
+            r.notes.add("getStructureErrors 在当前 GT 版本不存在（诊断跳过）");
         } catch (Throwable t) {
             r.notes.add("读取 getStructureErrors 失败: " + t);
         }

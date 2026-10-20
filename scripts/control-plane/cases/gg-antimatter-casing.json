@@ -1,0 +1,179 @@
+{
+  "schema": "lightning.case/1",
+  "id": "gg-antimatter-casing",
+  "label": "#87 锚点：GoodGenerator 反物质约束外壳 CTM——连通对/孤立形态 + 同 mod 正常对照（磁通/引力稳定外壳），六轴正交；机位按「pos 在过结构几何中心 G=(66.5,12.5,65.5) 的视轴上、yaw/pitch 反推」构造（游戏侧与 web 出图器具由构造同向，出处 #89 Lead 批准）",
+  "world": {
+    "folder": "cp_gg_casing",
+    "seed": 20261006,
+    "void": true,
+    "base": [64, 12, 64],
+    "settleTicks": 60
+  },
+  "build": [
+    { "op": "clear", "from": [62, 10, 62], "to": [72, 16, 70] },
+
+    { "op": "block", "at": [64, 12, 64], "id": "minecraft:stone", "meta": 0 },
+    { "op": "block", "at": [65, 12, 64], "id": "GoodGenerator:antimatterContainmentCasing", "meta": 0 },
+    { "op": "block", "at": [66, 12, 64], "id": "GoodGenerator:antimatterContainmentCasing", "meta": 0 },
+    { "op": "block", "at": [67, 12, 64], "id": "GoodGenerator:magneticFluxCasing", "meta": 0 },
+    { "op": "block", "at": [68, 12, 64], "id": "GoodGenerator:gravityStabilizationCasing", "meta": 0 },
+
+    { "op": "block", "at": [65, 12, 66], "id": "GoodGenerator:antimatterContainmentCasing", "meta": 0 },
+
+    { "op": "wait", "ticks": 20 }
+  ],
+  "capture": {
+    "lighting": "natural",
+    "renderMode": "本色",
+    "worldTime": 6000
+  },
+  "cameras": [
+    {
+      "name": "ortho-south",
+      "pos": [66.5, 12.5, 73.5],
+      "yaw": 180.0,
+      "pitch": 0.0,
+      "projection": { "type": "ortho", "orthoHeight": 6.0 },
+      "resolution": [1280, 720]
+    },
+    {
+      "name": "ortho-north",
+      "pos": [66.5, 12.5, 57.5],
+      "yaw": 0.0,
+      "pitch": 0.0,
+      "projection": { "type": "ortho", "orthoHeight": 6.0 },
+      "resolution": [1280, 720]
+    },
+    {
+      "name": "ortho-east",
+      "pos": [74.5, 12.5, 65.5],
+      "yaw": 90.0,
+      "pitch": 0.0,
+      "projection": { "type": "ortho", "orthoHeight": 6.0 },
+      "resolution": [1280, 720]
+    },
+    {
+      "name": "ortho-west",
+      "pos": [58.5, 12.5, 65.5],
+      "yaw": 270.0,
+      "pitch": 0.0,
+      "projection": { "type": "ortho", "orthoHeight": 6.0 },
+      "resolution": [1280, 720]
+    },
+    {
+      "name": "ortho-top",
+      "pos": [66.5, 20.5, 66.0],
+      "yaw": 180.0,
+      "pitch": 86.4,
+      "projection": { "type": "ortho", "orthoHeight": 8.0 },
+      "resolution": [1280, 720]
+    },
+    {
+      "name": "ortho-iso",
+      "pos": [60.376, 17.5, 71.624],
+      "yaw": 225.0,
+      "pitch": 30.0,
+      "projection": { "type": "ortho", "orthoHeight": 7.0 },
+      "resolution": [1280, 720]
+    }
+  ],
+  "criteria": [
+    {
+      "id": "img-south-size",
+      "type": "image-size-equals",
+      "params": { "path": "shots/ortho-south.png", "width": 1280, "height": 720 }
+    },
+    {
+      "id": "img-south-not-uniform",
+      "type": "image-not-uniform",
+      "params": { "path": "shots/ortho-south.png", "maxSameColorRatio": 0.98 }
+    },
+    {
+      "id": "img-north-size",
+      "type": "image-size-equals",
+      "params": { "path": "shots/ortho-north.png", "width": 1280, "height": 720 }
+    },
+    {
+      "id": "img-north-not-uniform",
+      "type": "image-not-uniform",
+      "params": { "path": "shots/ortho-north.png", "maxSameColorRatio": 0.98 }
+    },
+    {
+      "id": "img-east-size",
+      "type": "image-size-equals",
+      "params": { "path": "shots/ortho-east.png", "width": 1280, "height": 720 }
+    },
+    {
+      "id": "img-east-not-uniform",
+      "type": "image-not-uniform",
+      "params": { "path": "shots/ortho-east.png", "maxSameColorRatio": 0.98 }
+    },
+    {
+      "id": "img-west-size",
+      "type": "image-size-equals",
+      "params": { "path": "shots/ortho-west.png", "width": 1280, "height": 720 }
+    },
+    {
+      "id": "img-west-not-uniform",
+      "type": "image-not-uniform",
+      "params": { "path": "shots/ortho-west.png", "maxSameColorRatio": 0.98 }
+    },
+    {
+      "id": "img-top-size",
+      "type": "image-size-equals",
+      "params": { "path": "shots/ortho-top.png", "width": 1280, "height": 720 }
+    },
+    {
+      "id": "img-top-not-uniform",
+      "type": "image-not-uniform",
+      "params": { "path": "shots/ortho-top.png", "maxSameColorRatio": 0.98 }
+    },
+    {
+      "id": "img-iso-size",
+      "type": "image-size-equals",
+      "params": { "path": "shots/ortho-iso.png", "width": 1280, "height": 720 }
+    },
+    {
+      "id": "img-iso-not-uniform",
+      "type": "image-not-uniform",
+      "params": { "path": "shots/ortho-iso.png", "maxSameColorRatio": 0.98 }
+    },
+
+    {
+      "id": "world-hash",
+      "type": "world-hash-equals",
+      "params": {}
+    },
+    {
+      "id": "observation-exists",
+      "type": "artifact-exists",
+      "params": { "path": "observation.json" }
+    }
+  ],
+  "variants": [
+    {
+      "id": "neg-iso-acc-moved",
+      "mutate": [
+        {
+          "op": "replace",
+          "path": "/build/6/at",
+          "value": [65, 12, 67]
+        }
+      ],
+      "expectCriteriaRed": ["world-hash"]
+    }
+  ],
+  "evidence": {
+    "expect": [
+      { "path": "observation.json", "role": "observation" },
+      { "path": "criteria.json", "role": "criteria" },
+      { "path": "world/scene-manifest.json", "role": "scene-manifest" },
+      { "path": "shots/ortho-south.png", "role": "shot" },
+      { "path": "shots/ortho-north.png", "role": "shot" },
+      { "path": "shots/ortho-east.png", "role": "shot" },
+      { "path": "shots/ortho-west.png", "role": "shot" },
+      { "path": "shots/ortho-top.png", "role": "shot" },
+      { "path": "shots/ortho-iso.png", "role": "shot" }
+    ]
+  }
+}

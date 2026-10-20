@@ -89,7 +89,8 @@ public final class ReadTeAction implements ControlAction {
     // ------------------------------------------------------------ 单个位置
 
     /** 读一个位置：通用事实 + 逐族描述器输出。 */
-    private static JsonObject readOne(WorldServer world, int[] pos, boolean includeNbt, int nbtDepth, int nbtMaxEntries) {
+    private static JsonObject readOne(WorldServer world, int[] pos, boolean includeNbt, int nbtDepth,
+        int nbtMaxEntries) {
         JsonObject o = new JsonObject();
         o.add("pos", ReadSupport.posArray(pos));
 

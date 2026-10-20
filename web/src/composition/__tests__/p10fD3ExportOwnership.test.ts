@@ -15,7 +15,10 @@
  * | ④ | `artifact-host` 四断言仍成立 | 不变（Plain/Envelope/OBJ 仍在 `workbench/export/*`） |
  *
  * ⚠️ ① 的计数从 5 变 3 是**切链的必然结果**（等轴 PNG/GIF 不再取 plain 文档），不是
- * "顺手把计数改小"：`exec` 仍是 5（命令一个没少），下面两条断言一起看才说明这件事。
+ * "顺手把计数改小"：`exec` 是 6 = **5 个产品命令**（切链一个没少）+ **1 个验收器具命令**
+ * （`OPERATOR_EXPORT_SHOT_PNG`，合入 main 的 Web 内核后按新内核算子形态重接；它同样经
+ * `runShotExport` → 同一条捕获/作业链，见 `tests/architecture/export-chain.test.ts` C1）。
+ * 下面几条断言一起看才说明这件事。
  */
 import { describe, expect, it } from 'vitest'
 import fs from 'node:fs'
@@ -51,11 +54,12 @@ describe('D3/S5 ① 产字节归属：三条 JSON/ZIP 命令仍经 `plainForSave
     ).toBe(3)
   })
 
-  it('**反空洞真**：该文件确实还有五处 `exec`（命令一个没少，判据不是对着空文件跑）', () => {
+  it('**反空洞真**：该文件确实还有六处 `exec`（命令一个没少，判据不是对着空文件跑）', () => {
     const code = codeOnly(readSrc(commands))
     const execs = code.split('\n').filter((l) => /exec\(ctx/.test(l)).length
-    // Plain / Envelope / OBJ / 等轴 PNG / 场景 GIF = 5 处（切链不减少命令）。
-    expect(execs).toBe(5)
+    // Plain / Envelope / OBJ / 等轴 PNG / 场景 GIF = 5 个产品命令（切链不减少命令）
+    // + #87 验收器具 OPERATOR_EXPORT_SHOT_PNG = 6 处（它也经 runShotExport → 同一条作业链）。
+    expect(execs).toBe(6)
   })
 
   it('**旧路径不得复活**：该文件对旧读取入口零命中（真代码口径）', () => {

@@ -166,6 +166,38 @@ function depthRangeOf(
   return { min, max }
 }
 
+/**
+ * 裁剪面前后让开的余量（世界单位）。
+ *
+ * **方向不可写反**：near 必须落在内容最近点**之前**、far 落在最远点**之后**。
+ * 写成 "-maxZ + ε"（把近平面放到最近点之后）会让轴对齐机位的贴面整面被裁
+ * ——#87 的 ortho-north「整排消失只出孤立一枚」就是这条符号错误（实测记录见
+ * presentation/__tests__/shotCamera.test.ts 的负对照）。
+ */
+export const CAMERA_CLIP_MARGIN = 1e-2
+
+/**
+ * 内容 AABB 沿视轴方向的 near/far（**向外**包住整个 AABB）。
+ *
+ * 与 isoCameraSpecOf 用的是**同一份**计算：等轴四向与验收器具的显式机位
+ * 不允许各自写一份裁剪面政策（两份必然漂移，而漂移的表现是"某台机位边缘缺一层"）。
+ *
+ * @param target 内容包围盒中心（世界空间）
+ * @param dir 目标点指向相机的**单位**方向（相机位置 = target + dir·distance）
+ * @param distance 相机到目标的距离（与 dir 配套；决定近远平面在视轴上的刻度）
+ */
+export function clipPlanesAroundBounds(
+  bounds: IsoExportBounds,
+  target: readonly [number, number, number],
+  dir: readonly [number, number, number],
+  distance: number,
+  margin: number = CAMERA_CLIP_MARGIN,
+): { readonly near: number; readonly far: number } {
+  const depth = depthRangeOf(bounds, target, dir, distance)
+  const near = Math.max(0.01, depth.min - margin)
+  return { near, far: Math.max(near + 0.02, depth.max + margin) }
+}
+
 /** 视场角归一（与 `offscreenCamera#normalizeFov` 同一口径：非有限/非正 ⇒ 50°，夹到 (0,180)）。 */
 function normalizeFov(fovDegrees: number): number {
   if (!Number.isFinite(fovDegrees) || fovDegrees <= 0) return 50
@@ -204,15 +236,15 @@ export function isoCameraSpecOf(input: IsoCameraSpecInput & { readonly direction
   })
   const target = Object.freeze({ x: framing.target[0], y: framing.target[1], z: framing.target[2] })
 
-  // near/far：**保守值**（把 AABB 的视空间深度整个包住，前后各留 1e-2）。
+  // near/far：**保守值**（把 AABB 的视空间深度整个包住，前后各留余量）。
   // 必须按**本 spec 的距离**算 —— legacy 是照着 2.2*maxDim 的透视距离算的，
   // 换了距离还用旧 near/far 会把内容切掉（表现为"导出图边缘缺失"，静默）。
   let near = EMPTY_BOUNDS_NEAR
   let far = EMPTY_BOUNDS_FAR
   if (!framing.empty) {
-    const depth = depthRangeOf(input.bounds, framing.target, dir, distance)
-    near = Math.max(0.01, depth.min - 1e-2)
-    far = Math.max(near + 0.02, depth.max + 1e-2)
+    const clip = clipPlanesAroundBounds(input.bounds, framing.target, dir, distance)
+    near = clip.near
+    far = clip.far
   }
 
   return Object.freeze({

@@ -581,7 +581,7 @@ export type BlockFaceName = '+x' | '-x' | '+y' | '-y' | '+z' | '-z'
  * |---|---|
  * | `registryId` + `meta` | 拾取身份（`BlockRef.block_state_id`）、统计、tooltip 回退 |
  * | `geometry` | 网格构建（`structureGeometryCore`）、描边（`context/queries.ts:305`）、注解面（`annotationMeshProvider:268`）、部件检测（`partDetect`） |
- * | `occludesAdjacentFaces` | 邻面剔除（`structureGeometryCore:122/137/146/280/309`） |
+ * | `occludesAdjacentFaces` | 邻面剔除（`structureGeometryCore` 的 `shouldCullQuadFacingOpaqueNeighbor` 及其两处调用点；同方块邻面另由 `shouldCullQuadFacingSameBlockNeighbor` 按**方块身份**判，不看本字段） |
  * | `facing` + `nbt` | `buildVoxelVolume` → `VoxelState`（`render/data/grid.ts:48-49`）；`nbt` 另供检查器展示（`blockInspector.ts:33`） |
  * | `thumbnailPNG` | 图标缓存通道 2（`blockIconCache.ts:359-361`） |
  * | `tooltip` | 方块级说明行 |

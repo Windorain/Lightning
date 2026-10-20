@@ -33,6 +33,7 @@ import {
   listPaletteTextureDataUrls,
 } from '@/render/data/sceneDocumentMaterialHydrate'
 import { SimpleMaterialLibrary, type MaterialLibraryApi } from '@/render/materials/simpleMaterialLibrary'
+import type { TextureAlphaClass } from '@/domain/textureAlphaClass'
 
 /**
  * 材质 id → 已解码纹理（`null` = 该槽**当前**没有可用像素：未就绪/失败/未请求）。
@@ -42,30 +43,47 @@ import { SimpleMaterialLibrary, type MaterialLibraryApi } from '@/render/materia
 export type MaterialTextureResolver = (materialId: string) => THREE.Texture | null
 
 /**
+ * 材质 id → 贴图 **alpha 类别**（`undefined` = 未知：该槽没有可分类的像素）。
+ *
+ * 与 {@link MaterialTextureResolver} 同样**只允许查表** —— 分类是解码处的产出
+ * （`domain/textureAlphaClass#textureAlphaClassOf` 在 `composition/kernelTextureResources`
+ * 里被调用一次），本层不得再看像素。
+ */
+export type MaterialAlphaClassResolver = (materialId: string) => TextureAlphaClass | undefined
+
+/**
  * 由**已解码**的调色板纹理装配材质库。
  *
  * @param plainDoc 材质输入（内核渲染源面的 `materialInput`，或旧格式 plain；
  *   两者都只需 `materialPalette` + `textureBlobs` 两处，见 `listPaletteTextureDataUrls`）
  * @param textureFor 按材质 id 取**已解码**纹理（缺失 ⇒ `null`，**不**抛错）
+ * @param alphaClassFor 按材质 id 取**贴图 alpha 类别**（缺席 = 未知 ⇒ 维持修复前状态）。
+ *   **只做一次查表**：类别的生产点在解码处（`composition/kernelTextureResources#decodeOne`
+ *   的 `textureAlphaClassOf`），本模块不得重新扫像素（那会是第二份分类实现）。
  *
  * @returns 材质库。**不会**因为某一张纹理缺失而失败 —— 缺失只让该材质拿不到 `map`。
  */
 export function buildMaterialLibraryFromTextures(
   plainDoc: unknown,
   textureFor: MaterialTextureResolver,
+  alphaClassFor?: MaterialAlphaClassResolver,
 ): MaterialLibraryApi {
   const preloaded = new Map<string, THREE.Texture>()
+  const alphaClasses = new Map<string, TextureAlphaClass>()
   for (const { materialId } of listPaletteTextureDataUrls(plainDoc)) {
     const texture = textureFor(materialId)
     // 缺失 = 该槽这次没有像素。**不**造占位纹理：占位由呈现侧（无 map 的中性色）
     // 表达，材质库这里伪造一张会让"缺了"与"有图"不可区分（SPEC §7.4:254）。
     if (texture === null) continue
     preloaded.set(materialId, texture)
+    // 类别**只在有纹理的槽上**记录：没有像素就没有类别（缺席就是缺席）。
+    const alphaClass = alphaClassFor?.(materialId)
+    if (alphaClass !== undefined) alphaClasses.set(materialId, alphaClass)
   }
   // ⚠️ 必须用返回值：hydrate **不改写**输入（内核产物的材质条目是冻结的，
   // 原地写会抛 `Cannot add property blend, object is not extensible` —— P0 实测）。
   // 缺像素的槽由 hydrate 按"无纹理"退回 `opaque`（与旧链同一推断函数，一处实现）。
   const hydrated = hydrateMaterialBlendsInSceneDocument(plainDoc, preloaded)
   const registry = buildMaterialRegistryFromSceneDocument(hydrated)
-  return new SimpleMaterialLibrary(registry, preloaded)
+  return new SimpleMaterialLibrary(registry, preloaded, alphaClasses)
 }

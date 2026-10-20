@@ -61,6 +61,40 @@ describe('M8-5 · 已解码像素 → 图标材质库', () => {
     lib.dispose()
   })
 
+  /**
+   * **alpha 类别送达旧链**（#87 修复轮 3）：`alphaClassFor` 的值必须真的进到材质状态。
+   *
+   * 旧链（图标/嵌入侧）拿不到 `TextureBinding`，故类别经这个查表参数下达；映射本身仍由
+   * `domain/materialPass` 唯一给出（本判据只证"**传进去了**"，分类正确性由
+   * `render/mesh/__tests__/translucentNeighborCull.test.ts` ④ 走真实 PNG 证明）。
+   *
+   * 负对照是同一装配去掉 `alphaClassFor`（= 解码前的形态）⇒ 回到画家路径：
+   * 没有它，本判据只证"某个布尔位是 true"，证不了"类别是驱动量"。
+   */
+  it('alpha 类别（binary）⇒ 旧链材质也是 cutout 等价状态；缺席类别 ⇒ 画家路径', async () => {
+    const desc = {
+      materialId: '0',
+      blend: 'translucent' as const,
+      tint: new THREE.Color(0xffffff),
+      useVertexColor: true,
+    }
+    const withClass = buildMaterialLibraryFromTextures(plainDoc(1), () => texture(), () => 'binary')
+    const mat = await withClass.getMaterialForBatch(desc)
+    expect(
+      { transparent: mat.transparent, alphaTest: mat.alphaTest, depthWrite: mat.depthWrite },
+      'binary ⇒ cutout 等价（alphaTest + 写深度）',
+    ).toEqual({ transparent: true, alphaTest: 0.5, depthWrite: true })
+    withClass.dispose()
+
+    const withoutClass = buildMaterialLibraryFromTextures(plainDoc(1), () => texture())
+    const blend = await withoutClass.getMaterialForBatch(desc)
+    expect(
+      { transparent: blend.transparent, alphaTest: blend.alphaTest, depthWrite: blend.depthWrite },
+      '未知类别 ⇒ 修复前的画家路径（证明上一段不是恒真）',
+    ).toEqual({ transparent: true, alphaTest: 0, depthWrite: false })
+    withoutClass.dispose()
+  })
+
   it('**全缺**（全部资源失败）⇒ 仍然建出材质库、不抛（Q1：不夺视口；图标降级）', () => {
     expect(() => {
       const lib = buildMaterialLibraryFromTextures(plainDoc(4), () => null)

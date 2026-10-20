@@ -49,6 +49,7 @@ import {
 import { batchMaterialCacheKey, type BatchDescriptor } from '../mesh/batchDescriptor'
 import type { MaterialBlendMode, MaterialEntry, MaterialRegistryData } from '../schema/types'
 import { materialPassStateOf } from '@/domain/materialPass'
+import type { TextureAlphaClass } from '@/domain/textureAlphaClass'
 import { sampleStripFrameAt, stripTimeline, type StripTimeline } from '@/domain/materials'
 
 /**
@@ -91,14 +92,22 @@ export interface MaterialLibraryApi {
 }
 
 
+/**
+ * 面材质（旧渲染链的材质装配点）。
+ *
+ * `alphaClass` 是**贴图的 alpha 类别**（`domain/textureAlphaClass` 的产出），由调用方按
+ * 材质 id 传入：`domain/materialPass` 用它还原 Angelica 的"二值 translucent ⇒ cutout"
+ * 降级语义（#87 修复轮 3）。缺席 = 未知（还没解码）⇒ 与修复前同状态。
+ */
 function createFaceMaterial(
   tex: THREE.Texture,
   tint: THREE.Color,
   blend: MaterialBlendMode,
   useVertexColor: boolean,
+  alphaClass?: TextureAlphaClass,
 ): THREE.MeshBasicMaterial {
   const baseColor = useVertexColor ? new THREE.Color(0xffffff) : tint
-  const pass = materialPassStateOf(blend)
+  const pass = materialPassStateOf(blend, alphaClass)
   if (pass.transparent) {
     // 混合/裁切**状态**来自唯一映射（`domain/materialPass`），不在这里第二遍判断：
     // `translucent` 不写深度这一条修过实际缺陷（全透明四边形把后面的实体深度剔除）。
@@ -277,9 +286,34 @@ export class SimpleMaterialLibrary implements MaterialLibraryApi {
   private disposed = false
 
   /**
-   * @param preloaded 须已含 registry 中全部 materialId；纹理由 previewSession 按 palette 预取并传入
+   * 材质 id → 贴图 alpha 类别（旧链的**只读**旁路；缺席 = 未知）。
+   *
+   * ## 它为什么在这里、而不是让材质库自己扫像素
+   *
+   * 旧链拿到的是**已解码的 `THREE.Texture`**（像素在 `runtime/drwMeshPipeline` 的
+   * `decodedPalette` 里，来源是唯一解码链 `composition/kernelTextureResources`）。
+   * 类别的**唯一生产点**在解码处（`decodeOne` 调 `textureAlphaClassOf`），本库只消费，
+   * 不重新实现分类 —— 两处各扫一遍字节必然漂移（漂移的表现是"同一导出件两条链画得不一样"）。
+   *
+   * ## 时序：类别**先于**材质创建到位（故不需要"建好再改"的回写）
+   *
+   * 本库的材质是 `getMaterialForBatch` **懒创建**的，而 `preloaded`/本映射在构造时就已定；
+   * 纹理晚到（`applyDecodedTextures`）会**释放并按新像素重建整个库**（见 `drwMeshPipeline`），
+   * 于是"新类别"总是随新库一起进来。⇒ 这里没有"先创建后改 depthWrite"的适配代码
+   * （那种写法会引入第二写权威）。
    */
-  constructor(registry: MaterialRegistryData, preloaded: Map<string, THREE.Texture>) {
+  private readonly alphaClassByMaterialId: ReadonlyMap<string, TextureAlphaClass>
+
+  /**
+   * @param preloaded 须已含 registry 中全部 materialId；纹理由 previewSession 按 palette 预取并传入
+   * @param alphaClassByMaterialId 材质 id → 贴图 alpha 类别（缺席 = 未知；见字段说明）
+   */
+  constructor(
+    registry: MaterialRegistryData,
+    preloaded: Map<string, THREE.Texture>,
+    alphaClassByMaterialId: ReadonlyMap<string, TextureAlphaClass> = new Map(),
+  ) {
+    this.alphaClassByMaterialId = alphaClassByMaterialId
     for (const [materialId, tex] of preloaded) {
       const entry = registry.materials[materialId]
       if (!entry) continue
@@ -344,7 +378,13 @@ export class SimpleMaterialLibrary implements MaterialLibraryApi {
     const tex = this.textureByMaterialId.get(materialId)
     if (!tex) throw new Error(`纹理未预取: ${materialId}`)
 
-    const mat = createFaceMaterial(tex, tint, blend, descriptor.useVertexColor === true)
+    const mat = createFaceMaterial(
+      tex,
+      tint,
+      blend,
+      descriptor.useVertexColor === true,
+      this.alphaClassByMaterialId.get(materialId),
+    )
     this.materialByBatchKey.set(key, mat)
     return mat
   }

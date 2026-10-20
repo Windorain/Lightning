@@ -214,7 +214,11 @@ describe('D7 · 算子层：渲染下标与文件名同源（防再次分叉）'
       .readFileSync(path.join(import.meta.dirname, '..', '..', '..', 'workbench', 'export', 'isoExportJob.ts'), 'utf8')
       .replace(/\r\n/g, '\n')
     expect(runner, '文件名必须由作业入口从同一下标派生').toContain("(options.kind === 'image' ? 'iso-' : 'anim-') + dir")
-    expect(runner).toContain('const dir = String(options.directionIndex)')
+    expect(runner, '派生点只读同一个 directionIndex').toContain('String(options.directionIndex')
+    // 合入内核重建后派生收进唯一函数 `fileNameOf`（器具的显式 `fileName` 也走同一处），
+    // 于是"拼文件名"在文件里**只有一处**：
+    expect(runner.split("'iso-' : 'anim-'").length - 1, '文件名拼装必须只有一处').toBe(1)
+    expect(runner, '派生必须经唯一函数产出').toContain('function fileNameOf(')
     // 显式时间必须真的进捕获（而不是只改了 UI）。
     expect(SOURCE, '显式时间必须经归一入口进捕获').toContain('seconds,')
     // 反空洞真：变量确实由唯一入口产出（否则上面几条可能引用了别处的同名变量）
