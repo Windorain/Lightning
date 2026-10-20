@@ -25,7 +25,7 @@
  * | ① | **生产装配**（真实信封 → 内核 → 投影 → 生产几何核心）：成对 ACC 的共享面**零四边形**，两侧各自的面集合精确，孤立 ACC 六面完整（防过度剔除） |
  * | ② | **负对照**：同一份装配关掉剔除 ⇒ 共享面**确实在导出件里**（2 层 × 2 侧 = 4 片）—— 证明剔除正是它们消失的原因，并固定"捕获侧多录"这个事实 |
  * | ③ | **语义边界**（纯）：同状态不同槽位 ⇒ 剔；meta / facing / nbt / registryId 任一不同 ⇒ **不剔**（防判据过宽） |
- * | ④ | **混合模式送达消费点**（生产装配）：ACC 两组材质的 `blend` 是 `translucent`，且 `materialPassStateOf` 给出"混合 + 不写深度" |
+ * | ④ | **alpha 类别与 pass 状态送达消费点**（生产装配 + **真实 PNG 解码**）：ACC 两组材质的 `blend` 是 `translucent`、其 `TextureBinding` 带 `alphaClass='binary'`，且 `materialPassStateOf` 给出 **cutout 等价状态**（alphaTest 0.5 + 写深度）；负对照：同装配去掉类别 ⇒ 回到"混合 + 不写深度" |
  *
  * ## 为什么①必须走生产装配
  *
@@ -36,6 +36,7 @@
  */
 import fs from 'node:fs'
 import path from 'node:path'
+import pako from 'pako'
 import { describe, expect, it } from 'vitest'
 import { plainRootOf } from '@/adapters/plainRoot'
 import { assembleKernelDocument } from '@/composition/kernelAssembly'
@@ -49,6 +50,10 @@ import {
   createEnvelopeParser,
 } from '@/context/parsers/builtinParsers'
 import { materialPassStateOf } from '@/domain/materialPass'
+import { textureBindingsOf, textureResourcesOf, type TextureDecoder } from '@/composition/kernelTextureResources'
+import { compileScene } from '@/presentation/compileScene'
+import { BatchedPresenter } from '@/presentation/presenter'
+import type { TextureBinding, TexturePixels } from '@/presentation/textureBinding'
 import { TIME_ZERO } from '@/presentation/evaluationKey'
 import { structureRowToWorldY } from '@/render/data/grid'
 import { collectStructureGeometryPiecesPure, type BakedQuadGeometryPiece } from '@/render/mesh/structureGeometryCore'
@@ -162,6 +167,189 @@ function accPairOf(definition: StructureDefinition): { left: [number, number, nu
   throw new Error('夹具里没有成对相邻的 ACC —— 判据无法建立（不是断言失败）')
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 真实 PNG 解码（**生产解码器端口的测试侧实现**；不是合成像素）
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * **真实 PNG → RGBA8**。
+ *
+ * ## 为什么测试里要自带一个解码器（以及为什么它不算"手搓载荷"）
+ *
+ * 生产解码器是 `adapters/textureDecode#createDomTextureDecoder`（`createImageBitmap` + canvas），
+ * 在 vitest（Node）里没有 DOM。`TextureDecoder` 是**端口**，这正是它被设计成端口的原因
+ * （见 `composition/kernelTextureResources` 的说明）。已有生产判据
+ * （`composition/__tests__/textureUnificationProduction.test.ts`）注入的是**按载荷长度编造的**
+ * 像素 —— 那对"状态机/接线"够用，但**对 alpha 分类没有说服力**：分类看的正是真实 alpha 分布。
+ *
+ * ⇒ 本文件注入一个**真的把夹具字节解成 RGBA** 的解码器（支持导出件实际用到的
+ * colorType 2/3/4/6 与 bitDepth 4/8、非隔行）。于是：
+ *  - 被断言的不是"手工喂给分类函数的 binary"，而是**真实 PNG 的 alpha 通道**；
+ *  - 分类发生在**生产代码**里（`kernelTextureResources#decodeOne`），测试只提供像素来源。
+ */
+function decodePngRgba(payload: string): TexturePixels | null {
+  const bytes = Buffer.from(payload.replace(/^data:image\/png;base64,/, ''), 'base64')
+  const signature = [137, 80, 78, 71, 13, 10, 26, 10]
+  if (bytes.length < 8) return null
+  for (let i = 0; i < signature.length; i += 1) if (bytes[i] !== signature[i]) return null
+
+  let offset = 8
+  let width = 0
+  let height = 0
+  let bitDepth = 0
+  let colorType = 0
+  let interlace = 0
+  let palette: Buffer | null = null
+  let transparency: Buffer | null = null
+  const idat: Buffer[] = []
+  while (offset + 8 <= bytes.length) {
+    const length = bytes.readUInt32BE(offset)
+    const type = bytes.subarray(offset + 4, offset + 8).toString('latin1')
+    const data = bytes.subarray(offset + 8, offset + 8 + length)
+    if (type === 'IHDR') {
+      width = data.readUInt32BE(0)
+      height = data.readUInt32BE(4)
+      bitDepth = data[8]!
+      colorType = data[9]!
+      interlace = data[12]!
+    } else if (type === 'PLTE') {
+      palette = Buffer.from(data)
+    } else if (type === 'tRNS') {
+      transparency = Buffer.from(data)
+    } else if (type === 'IDAT') {
+      idat.push(Buffer.from(data))
+    } else if (type === 'IEND') {
+      break
+    }
+    offset += 12 + length
+  }
+
+  if (interlace !== 0) throw new Error('夹具 PNG 为隔行扫描 —— 本解码器只支持 interlace=0（宁可判红也不静默错解）')
+  const channels = colorType === 6 ? 4 : colorType === 2 ? 3 : colorType === 4 ? 2 : colorType === 0 ? 1 : 0
+  const isPalette = colorType === 3
+  if (isPalette) {
+    if (palette === null) throw new Error('调色板 PNG 缺 PLTE')
+    if (bitDepth !== 4 && bitDepth !== 8) throw new Error('调色板 PNG 的 bitDepth 只支持 4/8，实得 ' + bitDepth)
+  } else if (channels === 0 || bitDepth !== 8) {
+    throw new Error('不支持的 PNG 形态：colorType=' + colorType + ' bitDepth=' + bitDepth)
+  }
+
+  const raw = pako.inflate(new Uint8Array(Buffer.concat(idat)))
+  const bitsPerPixel = isPalette ? bitDepth : channels * 8
+  const stride = Math.ceil((width * bitsPerPixel) / 8)
+  const bpp = Math.max(1, Math.ceil(bitsPerPixel / 8))
+  const rgba = new Uint8Array(width * height * 4)
+  const prev = new Uint8Array(stride)
+  let p = 0
+  for (let y = 0; y < height; y += 1) {
+    const filter = raw[p]!
+    p += 1
+    const line = raw.subarray(p, p + stride)
+    p += stride
+    const cur = new Uint8Array(stride)
+    for (let x = 0; x < stride; x += 1) {
+      const a = x >= bpp ? cur[x - bpp]! : 0
+      const b = prev[x]!
+      const c = x >= bpp ? prev[x - bpp]! : 0
+      const value = line[x]!
+      if (filter === 0) cur[x] = value
+      else if (filter === 1) cur[x] = (value + a) & 0xff
+      else if (filter === 2) cur[x] = (value + b) & 0xff
+      else if (filter === 3) cur[x] = (value + ((a + b) >> 1)) & 0xff
+      else if (filter === 4) {
+        const pa = Math.abs(b - c)
+        const pb = Math.abs(a - c)
+        const pc = Math.abs(a + b - 2 * c)
+        cur[x] = (value + (pa <= pb && pa <= pc ? a : pb <= pc ? b : c)) & 0xff
+      } else throw new Error('未知 PNG 行过滤器: ' + filter)
+    }
+    for (let x = 0; x < width; x += 1) {
+      const di = (y * width + x) * 4
+      if (isPalette) {
+        const bitIndex = x * bitDepth
+        const byte = cur[bitIndex >> 3]!
+        const shift = 8 - bitDepth - (bitIndex & 7)
+        const index = (byte >> shift) & ((1 << bitDepth) - 1)
+        rgba[di] = palette![index * 3] ?? 0
+        rgba[di + 1] = palette![index * 3 + 1] ?? 0
+        rgba[di + 2] = palette![index * 3 + 2] ?? 0
+        rgba[di + 3] = transparency !== null && index < transparency.length ? transparency[index]! : 255
+      } else {
+        const si = x * channels
+        rgba[di] = cur[si]!
+        rgba[di + 1] = channels === 1 ? cur[si]! : cur[si + 1]!
+        rgba[di + 2] = channels === 1 ? cur[si]! : channels === 2 ? cur[si]! : cur[si + 2]!
+        rgba[di + 3] = channels >= 2 ? cur[si + channels - 1]! : 255
+      }
+    }
+    prev.set(cur)
+  }
+  return { width, height, rgba }
+}
+
+function realPngDecoder(): TextureDecoder {
+  return {
+    async decode(payload: string): Promise<TexturePixels | null> {
+      return payload === '' ? null : decodePngRgba(payload)
+    },
+  }
+}
+
+/** alpha 直方图（值 → 像素数；用来把"二值"钉在**真实像素**上，而不是只信分类结论）。 */
+function alphaHistogram(pixels: TexturePixels): Map<number, number> {
+  const hist = new Map<number, number>()
+  for (let i = 3; i < pixels.rgba.length; i += 4) {
+    const a = pixels.rgba[i]!
+    hist.set(a, (hist.get(a) ?? 0) + 1)
+  }
+  return hist
+}
+
+interface MaterialLike {
+  readonly transparent: boolean
+  readonly alphaTest: number
+  readonly depthWrite: boolean
+}
+
+/** 挂载树上的全部材质（**去重**：同一材质可被多个批次共享）。 */
+function mountedMaterials(root: { traverse(cb: (o: object) => void): void }): MaterialLike[] {
+  const seen = new Set<MaterialLike>()
+  root.traverse((o) => {
+    const holder = o as { material?: MaterialLike | MaterialLike[] }
+    const mat = holder.material
+    if (mat === undefined) return
+    if (Array.isArray(mat)) for (const m of mat) seen.add(m)
+    else seen.add(mat)
+  })
+  return [...seen]
+}
+
+/** 去掉 `alphaClass` 的绑定形状（**负对照**用：等价于"贴图还没解码"的绑定）。 */
+function withoutAlphaClass(binding: TextureBinding): TextureBinding {
+  const copy = { ...binding } as Record<string, unknown>
+  delete copy.alphaClass
+  return copy as unknown as TextureBinding
+}
+
+/** cutout 等价状态（**字面量**，不从被测模块取：否则把被测值当期望值 = 恒绿）。 */
+const CUTOUT_EQUIVALENT = Object.freeze({ transparent: true, alphaTest: 0.5, depthWrite: true })
+/** 真半透明的画家路径（修复前形态）。 */
+const BLEND_PATH = Object.freeze({ transparent: true, alphaTest: 0, depthWrite: false })
+
+/** ACC 的两张贴图（CTM 变体）在 `materialPalette` 里对应两个材质槽。 */
+function accMaterialIdsOf(
+  inputs: { readonly primitives: readonly { readonly material: { readonly id: string; readonly blend: string } }[] },
+  content: { readonly resources: readonly { readonly ref: { readonly url: string } }[] },
+): Set<string> {
+  const out = new Set<string>()
+  for (const p of inputs.primitives) {
+    const index = Number(p.material.id.slice('material:'.length))
+    const url = content.resources[index]?.ref.url ?? ''
+    if (url.includes('antimatterglass')) out.add(p.material.id)
+  }
+  return out
+}
+
 describe('#87 · 成对 ACC 的共享面必须按方块状态剔除（生产装配）', () => {
   it('① 共享面零四边形；两侧其余面完整；孤立 ACC 六面完整', async () => {
     const { definition, dims } = await productionAssembly()
@@ -219,7 +407,35 @@ describe('#87 · 成对 ACC 的共享面必须按方块状态剔除（生产装�
     expect(all.length - culled.length, '剔除总量（4 同状态共享面 + 2 不透明邻面）').toBe(6)
   })
 
-  it('④ 混合模式送达消费点：ACC 材质 blend=translucent，且该状态**不写深度**', async () => {
+  /**
+   * ④ **alpha 类别与 pass 状态送达消费点**（生产装配 + **真实 PNG 解码**）。
+   *
+   * ## 这条判据抓什么（用户验收的缺陷形态）
+   *
+   * ACC 声明 `blend=translucent`，但它的 CTM 贴图是**二值 alpha**（实测直方图 {0,255}）
+   * ⇒ 游戏侧 Angelica 把材质降级成 CUTOUT_MIPPED（alphaTest + 写深度）
+   * （`AngelicaChunkBuildContext.java:105-106`）。web 若照着声明画"混合 + 不写深度"，
+   * 两块玻璃之间**没有深度裁决** ⇒ 远处玻璃盖住近处玻璃的白边（#87 的像素级证据）。
+   *
+   * ## 为什么必须走生产装配 + 真实像素
+   *
+   * 手工把 `'binary'` 喂给 `materialPassStateOf` 会恒绿：真正的风险在生产链**根本不填**
+   * 这个类别（`decodeOne` 没分类 / 绑定没复制 / 消费点没读）。故本条的输入链是
+   * `真实信封 → 生产 parser → kernelPresentationInputs → textureResourcesOf（真实 PNG 解码 +
+   * decodeOne 内分类）→ textureBindingsOf → BatchedPresenter（真实 createMaterial）`。
+   *
+   * ## 判据分组
+   *
+   * | # | 断言 | 抓什么 |
+   * |---|---|---|
+   * | ④-a | ACC 两张贴图 `ready` 且 alpha 直方图**只有 0 与 255** | 前提：类别不是猜的 |
+   * | ④-b | `TextureResource#alphaClass === 'binary'` | 分类**在生产解码链里**真的发生 |
+   * | ④-c | `TextureBinding#alphaClass === 'binary'`（ACC 每个材质） | 绑定真的复制了类别 |
+   * | ④-d | `materialPassStateOf(blend, binding.alphaClass)` = cutout 等价（含与 `'cutout'` 逐字段相等） | 政策真的按类别分叉 |
+   * | ④-e | **挂载材质**（`createMaterial` 的产物）逐一是 cutout 等价状态，数量 = ACC 材质数 | 消费点真的读了类别（不是只到绑定层） |
+   * | ④-f | **负对照**：同装配但绑定去掉类别（= 解码前形态）⇒ 挂载材质回到"混合 + 不写深度" | ④-e 有区分力（不是恒真） |
+   */
+  it('④ ACC 的 alpha 类别是 binary，且 pass 状态 = cutout 等价（真实 PNG 解码 → 生产装配 → 挂载材质）', async () => {
     const { scene, content } = await productionAssembly()
     const { inputs } = kernelPresentationInputs({
       layerWorldY: null,
@@ -227,17 +443,84 @@ describe('#87 · 成对 ACC 的共享面必须按方块状态剔除（生产装�
       content,
       key: { documentVersion: 1, scene: scene.id, time: TIME_ZERO, parameterVersion: 0, contentResourceVersions: {} },
     })
-    const accMaterials = inputs.primitives.filter(
-      (p) => content.resources[Number(p.material.id.slice('material:'.length))]?.ref.url.includes('antimatterglass'),
-    )
-    expect(accMaterials.length, 'ACC 的两张 CTM 贴图各是一个材质图元').toBe(2)
-    for (const p of accMaterials) {
-      expect(p.material.blend, `${p.material.id} 的混合模式必须来自调色板`).toBe('translucent')
-      expect(materialPassStateOf(p.material.blend), '混合 pass 不写深度（MC pass 1 语义）').toEqual({
-        transparent: true,
-        alphaTest: 0,
-        depthWrite: false,
-      })
+    const accIds = accMaterialIdsOf(inputs, content)
+    expect(accIds.size, 'ACC 的两张 CTM 贴图各是一个材质').toBe(2)
+    for (const p of inputs.primitives) {
+      if (!accIds.has(p.material.id)) continue
+      expect(p.material.blend, p.material.id + ' 的混合模式必须来自调色板').toBe('translucent')
+    }
+
+    // ── ④-a/b：真实 PNG 解码 → 生产 `decodeOne` 内的分类 ──
+    const resources = await textureResourcesOf(content.resources, realPngDecoder())
+    const accIndexes = content.resources
+      .map((r, index) => ({ url: r.ref.url, index }))
+      .filter(({ url }) => url.includes('antimatterglass'))
+      .map(({ index }) => index)
+    expect(accIndexes.length, '生产资源表里必须恰好两条 ACC 贴图').toBe(2)
+    for (const index of accIndexes) {
+      const resource = resources[index]!
+      expect(resource.state, '真实 PNG 必须解码成功（否则本条无从谈起）').toBe('ready')
+      expect(resource.pixels, 'ready ⇒ 必须有像素').not.toBeNull()
+      const hist = alphaHistogram(resource.pixels!)
+      const values = [...hist.keys()].sort((a, b) => a - b)
+      expect(values, 'ACC 贴图是二值 alpha（{0,255}）——分类的前提').toEqual([0, 255])
+      expect(resource.alphaClass, '生产解码链必须把这张图分类为 binary').toBe('binary')
+    }
+
+    // ── ④-c/d：绑定真的带上了类别，政策真的按类别分叉 ──
+    const bindings = textureBindingsOf({ materials: inputs.primitives.map((p) => p.material), resources })
+    const bindingById = new Map(bindings.map((b) => [b.materialId, b]))
+    for (const id of accIds) {
+      const binding = bindingById.get(id)
+      expect(binding, id + ' 必须有绑定').toBeDefined()
+      expect(binding!.alphaClass, id + ' 的绑定必须带 alphaClass=binary').toBe('binary')
+      const state = materialPassStateOf('translucent', binding!.alphaClass)
+      expect(state, '二值 translucent ⇒ cutout 等价状态（alphaTest + 写深度）').toEqual(CUTOUT_EQUIVALENT)
+      // "等价"逐字成立：与 cutout 声明的状态**逐字段相等**（同一个状态值）。
+      expect(state).toEqual(materialPassStateOf('cutout'))
+    }
+
+    // ── ④-e：消费点 —— 真实挂载材质（只取 ACC 图元，使"每个挂载材质都是 ACC"成立）──
+    const accPrimitives = inputs.primitives.filter((p) => accIds.has(p.material.id))
+    const compiled = compileScene({ ...inputs, primitives: accPrimitives })
+    expect(compiled.ok, '生产输入必须可编译').toBe(true)
+    if (!compiled.ok) throw new Error('narrow')
+    const presenter = new BatchedPresenter({
+      scope: 'test:87-acc-alpha',
+      textureBindings: new Map(bindings.map((b) => [b.materialId, b])),
+    })
+    try {
+      presenter.apply(compiled.value)
+      const materials = mountedMaterials(presenter.object3d)
+      expect(materials.length, '挂载材质数必须等于 ACC 材质数（否则本条没覆盖到创建路径）').toBe(accIds.size)
+      for (const material of materials) {
+        expect(
+          { transparent: material.transparent, alphaTest: material.alphaTest, depthWrite: material.depthWrite },
+          'ACC 的挂载材质必须是 cutout 等价状态（近处白框不得被远处斜角盖住）',
+        ).toEqual(CUTOUT_EQUIVALENT)
+      }
+    } finally {
+      presenter.dispose()
+    }
+
+    // ── ④-f：负对照 —— 去掉类别（= 贴图还没解码时的绑定形状）⇒ 回到画家路径 ──
+    const unknownBindings = new Map(bindings.map((b) => [b.materialId, withoutAlphaClass(b)]))
+    const unknownPresenter = new BatchedPresenter({
+      scope: 'test:87-acc-unknown',
+      textureBindings: unknownBindings,
+    })
+    try {
+      unknownPresenter.apply(compiled.value)
+      const materials = mountedMaterials(unknownPresenter.object3d)
+      expect(materials.length, '负对照同样必须挂载 ACC 材质').toBe(accIds.size)
+      for (const material of materials) {
+        expect(
+          { transparent: material.transparent, alphaTest: material.alphaTest, depthWrite: material.depthWrite },
+          '未知类别 ⇒ 修复前的画家路径（证明 ④-e 不是恒真）',
+        ).toEqual(BLEND_PATH)
+      }
+    } finally {
+      unknownPresenter.dispose()
     }
   })
 })
