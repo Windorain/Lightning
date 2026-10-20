@@ -1,0 +1,49 @@
+{
+  "schema": "lightning.accept.scene/1",
+  "id": "lp-pipe-single",
+  "title": "LP 单管（负对照）：孤立时不得出现连接臂",
+  "notes": "抓连接臂的负对照。孤立单管只有管体：三轴都应停在 0.1872..0.8128，出现 0/1 就说明把包围盒撑大了而不是真抓到了臂。",
+  "world": {
+    "region": "cp_accept_lp_pipe_single",
+    "origin": [
+      64,
+      12,
+      63
+    ],
+    "dim": 0,
+    "time": 6000,
+    "weather": "clear"
+  },
+  "blocks": [
+    {
+      "block": "lp-pipe",
+      "at": [
+        0,
+        0,
+        0
+      ]
+    }
+  ],
+  "cameras": {
+    "views": [
+      "front",
+      "top"
+    ],
+    "axonometric": [
+      {
+        "name": "iso-se",
+        "yaw": 135,
+        "pitch": 30
+      }
+    ],
+    "orthoHeight": "auto",
+    "resolution": [
+      1920,
+      1080
+    ]
+  },
+  "export": {
+    "name": "lp-pipe-single",
+    "shape": "world"
+  }
+}

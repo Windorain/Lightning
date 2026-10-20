@@ -109,6 +109,17 @@ public final class StructureScan {
                     /* 跳过无法序列化的 TE */
                 }
             }
+            // Gitea #410 方向 A：渲染状态承载族（首个：LP 管道）把「模组本该发给客户端的那份状态」
+            // 按模组自有格式随快照带走；捕获侧据此回填副本 TE。不承载的方块不产出这两个字段。
+            if (s.tileRenderState != null && s.tileRenderState.length > 0) {
+                if (s.tileRenderStateFormat != null && !s.tileRenderStateFormat.isEmpty()) {
+                    t.addProperty("tileRenderStateFormat", s.tileRenderStateFormat);
+                }
+                t.addProperty(
+                    "tileRenderStateB64",
+                    Base64.getEncoder()
+                        .encodeToString(s.tileRenderState));
+            }
             cellTypes.add(t);
         }
         root.add("cellTypes", cellTypes);
