@@ -3,19 +3,23 @@
  * ============================================================================
  *
  * 这里只做一件事：把「一个导出件文档」判成「有没有坏材质、坏在哪、有没有被真正用到」。
- * 判据刻意保持与既有调查逐条一致，不在本工具里重新发明：
+ * 判据只看贴图本身与材质 locator，不依赖导出器版本或任何上游工单：
  *
- *   #87 型（缺失材质占位图）—— 参考 temp/pb-26-triage/assets/scan-placeholder-python.txt：
- *        16x16、颜色数 <= 4、洋红像素占比 > 10%、纯黑像素占比 > 10%
- *        （洋红 = |r-255|<24 且 g<24 且 |b-255|<24；纯黑 = max(r,g,b)<24）
+ *   missingTexture（缺失材质占位图）
+ *       贴图本身就是 Minecraft 的缺失材质占位图：16x16、颜色数 <= 4、
+ *       洋红像素占比 > 10%、纯黑像素占比 > 10%
+ *       （洋红 = |r-255|<24 且 g<24 且 |b-255|<24；纯黑 = max(r,g,b)<24）。
+ *       命中说明导出时材质没解析出来，页面上会渲染成黑/洋红棋盘。
  *
- *   #9 型（横向多面带整条当单面）—— 参考 temp/pb-ic2-fix/issue9-comment.md：
- *        blob 为 384x32 或 192x32 的横向带（H=32、W=N*32、W>32），且材质是 IC2 系 locator。
- *        IC2 系只认 locator 前缀 ic2: / ic2/，不猜注册名里的其它线索。
+ *   ic2FaceStrip（IC2 横向多面带）
+ *       IC2 的部分机器贴图是「一张 PNG 横向排 N 个面」，导出器把整条带当成一个面：
+ *       blob 为 384x32 或 192x32（H=32、W=N*32、W>32），且材质 locator 是 IC2 系。
+ *       IC2 系只认 locator 前缀 ic2: / ic2/，不猜注册名里的其它线索。
+ *       命中说明一个面上被压进了 N 个面的像素。
  *
  *   其它可疑但不满足上两条的 —— 一律进「未判型」桶，如实列出，禁止硬塞：
  *        - 横向带形状但非 IC2 或宽度不是 384/192；
- *        - 占位图形状（尺寸 <= 32、颜色数 <= 8、洋红和纯黑都出现）但没达到 #87 门槛；
+ *        - 占位图形状（尺寸 <= 32、颜色数 <= 8、洋红和纯黑都出现）但没达到 missingTexture 门槛；
  *        - 贴图解码失败（隔行/非 PNG 等）—— 记为缺口，同样不猜。
  *
  * 「坏材质」与「页面命中」是两件事：blob 坏 ≠ 这个结构真的画错。只有坏 blob 被
@@ -26,52 +30,52 @@
 import { PngError, pngStats } from './png.mjs'
 
 export const CRITERIA = Object.freeze({
-  placeholder87: Object.freeze({ width: 16, height: 16, maxColors: 4, minMagenta: 0.1, minBlack: 0.1 }),
-  strip9: Object.freeze({ height: 32, widths: [384, 192], locator: /^ic2[:/]/i }),
+  missingTexture: Object.freeze({ width: 16, height: 16, maxColors: 4, minMagenta: 0.1, minBlack: 0.1 }),
+  ic2FaceStrip: Object.freeze({ height: 32, widths: [384, 192], locator: /^ic2[:/]/i }),
   placeholderLike: Object.freeze({ maxSide: 32, maxColors: 8, minMagenta: 0.02, minBlack: 0.02 }),
 })
 
-/** 只按贴图本身判 #87 与「像占位图」，不涉及 locator。 */
+/** 只按贴图本身判 missingTexture 与「像占位图」，不涉及 locator。 */
 export function classifyBlob(stats) {
-  const c = CRITERIA.placeholder87
-  const placeholder87 =
+  const c = CRITERIA.missingTexture
+  const missingTexture =
     stats.width === c.width &&
     stats.height === c.height &&
     stats.uniqueColors <= c.maxColors &&
     stats.magentaRatio > c.minMagenta &&
     stats.blackRatio > c.minBlack
 
-  const stripShape = stats.height === CRITERIA.strip9.height && stats.width > CRITERIA.strip9.height
+  const stripShape = stats.height === CRITERIA.ic2FaceStrip.height && stats.width > CRITERIA.ic2FaceStrip.height
 
   const p = CRITERIA.placeholderLike
   const placeholderLike =
-    !placeholder87 &&
+    !missingTexture &&
     stats.width <= p.maxSide &&
     stats.height <= p.maxSide &&
     stats.uniqueColors <= p.maxColors &&
     stats.magentaRatio > p.minMagenta &&
     stats.blackRatio > p.minBlack
 
-  return { placeholder87, stripShape, placeholderLike }
+  return { missingTexture, stripShape, placeholderLike }
 }
 
 /**
- * 材质级判定：#87 看贴图；#9 看贴图形状 + locator 是否 IC2 系。
- * @returns {{verdict:'ok'|'placeholder87'|'strip9'|'unclassified'|'error', reason:string|null}}
+ * 材质级判定：missingTexture 看贴图；ic2FaceStrip 看贴图形状 + locator 是否 IC2 系。
+ * @returns {{verdict:'ok'|'missing-texture'|'ic2-face-strip'|'unclassified'|'error', reason:string|null}}
  */
 export function judgeMaterial(stats, locator, decodeError) {
   if (decodeError) return { verdict: 'error', reason: decodeError }
   const shape = classifyBlob(stats)
-  if (shape.placeholder87) return { verdict: 'placeholder87', reason: null }
+  if (shape.missingTexture) return { verdict: 'missing-texture', reason: null }
   if (shape.stripShape) {
-    const isIcc = CRITERIA.strip9.locator.test(String(locator || ''))
-    const widthOk = CRITERIA.strip9.widths.includes(stats.width)
-    if (isIcc && widthOk) return { verdict: 'strip9', reason: null }
+    const isIcc = CRITERIA.ic2FaceStrip.locator.test(String(locator || ''))
+    const widthOk = CRITERIA.ic2FaceStrip.widths.includes(stats.width)
+    if (isIcc && widthOk) return { verdict: 'ic2-face-strip', reason: null }
     if (!isIcc) return { verdict: 'unclassified', reason: '横向带形状但 locator 非 IC2 系' }
     return { verdict: 'unclassified', reason: 'IC2 系横向带但宽度不是 384/192（实测 ' + stats.width + 'x32）' }
   }
   if (shape.placeholderLike) {
-    return { verdict: 'unclassified', reason: '像占位图但未达 #87 门槛（' + stats.width + 'x' + stats.height + '，' + stats.uniqueColors + ' 色）' }
+    return { verdict: 'unclassified', reason: '像占位图但未达 missingTexture 门槛（' + stats.width + 'x' + stats.height + '，' + stats.uniqueColors + ' 色）' }
   }
   return { verdict: 'ok', reason: null }
 }
@@ -224,12 +228,12 @@ export function auditDocument(doc) {
   }
 
   const unclassified = badBlobs.filter((b) => b.verdict === 'unclassified')
-  const hits87 = badBlobs.filter((b) => b.verdict === 'placeholder87')
-  const hits9 = badBlobs.filter((b) => b.verdict === 'strip9')
+  const hitsMissingTexture = badBlobs.filter((b) => b.verdict === 'missing-texture')
+  const hitsFaceStrip = badBlobs.filter((b) => b.verdict === 'ic2-face-strip')
   const decodeErrors = badBlobs.filter((b) => b.verdict === 'error')
 
   let status = 'ok'
-  if (hits87.some((b) => b.usedInGrid) || hits9.some((b) => b.usedInGrid)) status = 'bad'
+  if (hitsMissingTexture.some((b) => b.usedInGrid) || hitsFaceStrip.some((b) => b.usedInGrid)) status = 'bad'
   else if (badBlobs.length) status = 'warn'
   if (!blobs.length && !materials.length) status = 'no-textures'
 
@@ -239,8 +243,8 @@ export function auditDocument(doc) {
     blobCount: blobs.length,
     materialCount: materials.length,
     blockCount,
-    hits87: hits87.length,
-    hits9: hits9.length,
+    hitsMissingTexture: hitsMissingTexture.length,
+    hitsFaceStrip: hitsFaceStrip.length,
     unclassifiedCount: unclassified.length,
     decodeErrorCount: decodeErrors.length,
     badBlobs,
@@ -257,7 +261,7 @@ export function auditDocument(doc) {
   }
 }
 
-const SEVERITY = { ok: 0, unclassified: 1, error: 2, strip9: 3, placeholder87: 4 }
+const SEVERITY = { ok: 0, unclassified: 1, error: 2, 'ic2-face-strip': 3, 'missing-texture': 4 }
 
 function worstVerdict(list) {
   let worst = 'ok'

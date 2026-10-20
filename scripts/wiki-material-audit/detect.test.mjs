@@ -30,10 +30,10 @@ function placeholderDoc({ used }) {
   })
 }
 
-test('#87 命中：占位 blob 被 grid 里的方块引用 => status=bad', () => {
+test('missingTexture 命中：占位 blob 被 grid 里的方块引用 => status=bad', () => {
   const result = auditDocument(placeholderDoc({ used: true }))
   assert.equal(result.status, 'bad')
-  assert.equal(result.hits87, 1)
+  assert.equal(result.hitsMissingTexture, 1)
   assert.equal(result.badBlobs[0].usedInGrid, true)
   assert.deepEqual(result.badBlobs[0].stats, {
     width: 16,
@@ -45,14 +45,14 @@ test('#87 命中：占位 blob 被 grid 里的方块引用 => status=bad', () =>
   })
 })
 
-test('#87 残留：坏 blob 存在但没有任何格子用到 => status=warn，不冤枉页面', () => {
+test('missingTexture 残留：坏 blob 存在但没有任何格子用到 => status=warn，不冤枉页面', () => {
   const result = auditDocument(placeholderDoc({ used: false }))
   assert.equal(result.status, 'warn')
-  assert.equal(result.hits87, 1)
+  assert.equal(result.hitsMissingTexture, 1)
   assert.equal(result.badBlobs[0].usedInGrid, false)
 })
 
-test('#9 命中：384x32 + IC2 locator', () => {
+test('ic2FaceStrip 命中：384x32 + IC2 locator', () => {
   const doc = makeDocument({
     blobs: [pngBase64(strip(12))],
     materials: [makeMaterial('ic2:machine/blockLathe:0', 0)],
@@ -61,20 +61,20 @@ test('#9 命中：384x32 + IC2 locator', () => {
   })
   const result = auditDocument(doc)
   assert.equal(result.status, 'bad')
-  assert.equal(result.hits9, 1)
+  assert.equal(result.hitsFaceStrip, 1)
 })
 
-test('#9 命中：192x32 也是横向多面带', () => {
+test('ic2FaceStrip 命中：192x32 也是横向多面带', () => {
   const doc = makeDocument({
     blobs: [pngBase64(strip(6))],
     materials: [makeMaterial('ic2:generator/blockNuclearReactor:4', 0)],
     blocks: [makeBlock('ic2:blockGenerator', [0])],
     grid: gridWith([0]),
   })
-  assert.equal(auditDocument(doc).hits9, 1)
+  assert.equal(auditDocument(doc).hitsFaceStrip, 1)
 })
 
-test('#9 负对照：384x32 但 locator 不是 IC2 => 未判型，不硬塞', () => {
+test('ic2FaceStrip 负对照：384x32 但 locator 不是 IC2 => 未判型，不硬塞', () => {
   const doc = makeDocument({
     blobs: [pngBase64(strip(12))],
     materials: [makeMaterial('gregtech:iconsets/MACHINE_LV_BOTTOM', 0)],
@@ -82,13 +82,13 @@ test('#9 负对照：384x32 但 locator 不是 IC2 => 未判型，不硬塞', ()
     grid: gridWith([0]),
   })
   const result = auditDocument(doc)
-  assert.equal(result.hits9, 0)
+  assert.equal(result.hitsFaceStrip, 0)
   assert.equal(result.unclassifiedCount, 1)
   assert.match(result.unclassified[0].reason, /非 IC2/)
   assert.equal(result.status, 'warn')
 })
 
-test('#9 负对照：32x32 单面 + IC2 locator 不是横向带', () => {
+test('ic2FaceStrip 负对照：32x32 单面 + IC2 locator 不是横向带', () => {
   const doc = makeDocument({
     blobs: [pngBase64(strip(1))],
     materials: [makeMaterial('ic2:machine/blockMiner:7', 0)],
@@ -96,7 +96,7 @@ test('#9 负对照：32x32 单面 + IC2 locator 不是横向带', () => {
     grid: gridWith([0]),
   })
   const result = auditDocument(doc)
-  assert.equal(result.hits9, 0)
+  assert.equal(result.hitsFaceStrip, 0)
   assert.equal(result.status, 'ok')
 })
 
@@ -135,7 +135,7 @@ test('frames 布局：几何在 frames[].structure，材质/贴图在根上', ()
   assert.equal(result.status, 'bad')
 })
 
-test('classifyBlob/judgeMaterial 边界：5 色 16x16 不满足 #87 颜色数', () => {
+test('classifyBlob/judgeMaterial 边界：5 色 16x16 不满足 missingTexture 颜色数', () => {
   const stats = {
     width: 16,
     height: 16,
@@ -144,7 +144,7 @@ test('classifyBlob/judgeMaterial 边界：5 色 16x16 不满足 #87 颜色数', 
     blackRatio: 0.3,
     bytes: 100,
   }
-  assert.equal(classifyBlob(stats).placeholder87, false)
+  assert.equal(classifyBlob(stats).missingTexture, false)
   assert.equal(judgeMaterial(stats, 'x:y').verdict, 'unclassified')
 })
 

@@ -32,7 +32,7 @@ test('encodePng -> decodePng 像素往返一致', () => {
   ])
 })
 
-test('#87 占位图统计：16x16、2 色、洋红/纯黑各 50%', () => {
+test('missingTexture 统计：16x16、2 色、洋红/纯黑各 50%', () => {
   const stats = pngStats(encodePng(placeholder16()))
   assert.equal(stats.width, 16)
   assert.equal(stats.height, 16)
