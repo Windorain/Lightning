@@ -68,7 +68,29 @@ public final class LpPipeCaptureDiag {
             .append(wy)
             .append(',')
             .append(wz);
+        sb.append(" copy{");
         appendState(sb, te);
+        sb.append(" }");
+        // 同一格上**活动客户端世界**里的那个 TE（捕获渲染用的可能不是它）
+        TileEntity active = null;
+        try {
+            net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getMinecraft();
+            if (mc != null && mc.theWorld != null) {
+                active = mc.theWorld.getTileEntity(wx, wy, wz);
+            }
+        } catch (Throwable t) {
+            sb.append(" active=ERR ")
+                .append(t);
+        }
+        if (active != null) {
+            sb.append(" active{same=")
+                .append(active == te)
+                .append(' ');
+            appendState(sb, active);
+            sb.append(" }");
+        } else {
+            sb.append(" active=null");
+        }
         System.out.println(sb);
     }
 
