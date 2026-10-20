@@ -165,6 +165,17 @@ public final class TextureStripCrop {
         if (count < 2) {
             return -1;
         }
+        /*
+         * 2 列带要按游戏自身的特例走：IC2 BlockTextureStitched.loadSubImage:128-137 对 count==2 的
+         * 分支是 index /= 6（= 6 面 × 2 变体，inactive/active 各占一列），不是 index %= count。
+         * 实测 IC2 2.2.828 里确有 2 列带：wiring/cable/blockDetectorCable 与 blockSplitterCable
+         * （32×16 = 2 × 16px），BlockCable 注册的 subIndex 是 0..5 ⇒ 用 % 会把 5 个面取到不存在的第 2 列。
+         * 其它 mod 的 2 列带语义无从查证，按同一约定处理并在契约里写明（本批未实机验证电缆）。
+         */
+        if (count == 2) {
+            int column = faceIndex / 6;
+            return column < count ? column : count - 1;
+        }
         return faceIndex % count;
     }
 

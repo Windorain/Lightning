@@ -164,6 +164,33 @@ public class TextureStripCropTest {
         assertEquals(-1, TextureStripCrop.columnIndexForFace(32, 32, 32, 32, 3));
     }
 
+    /**
+     * 2 列带按游戏特例取列：IC2 {@code loadSubImage} 对 {@code count==2} 走 {@code index /= 6}
+     * （6 面 × inactive/active 各一列），**不是** {@code index %= count}。
+     *
+     * <p>
+     * 实测 IC2 2.2.828 的 2 列带只有两张：{@code wiring/cable/blockDetectorCable} 与
+     * {@code wiring/cable/blockSplitterCable}（32×16 = 2 × 16px）；{@code BlockCable} 注册的
+     * subIndex 是 0..5 ⇒ 若按 {@code % 2} 会取到不存在的第 2 列（面图错）。本判据把口径钉住，
+     * 并显式断言它与 {@code % 2} 不同（负对照）。
+     */
+    @Test
+    public void twoColumnStripFollowsGameDivideBySixRule() {
+        // 32×16 = 2 列 × 16px；subIndex 0..5 全在第 0 列（% 2 会给 0,1,0,1,0,1 —— 错）
+        for (int face = 0; face <= 5; face++) {
+            assertEquals("面号 " + face + " 应取第 0 列", 0, TextureStripCrop.columnIndexForFace(32, 16, 16, 16, face));
+        }
+        // 12 态的 2 列带（subIndex 6..11 = active）落在第 1 列
+        for (int face = 6; face <= 11; face++) {
+            assertEquals("面号 " + face + " 应取第 1 列", 1, TextureStripCrop.columnIndexForFace(32, 16, 16, 16, face));
+        }
+        // 负对照：把规则写成 % count 时，面号 1 会得 1，与游戏口径 0 不同
+        assertEquals("游戏口径", 0, TextureStripCrop.columnIndexForFace(32, 16, 16, 16, 1));
+        assertTrue("与 % count 的取值确实不同（否则本判据没有判别力）", 0 != (1 % (32 / 16)));
+        // 越界面号收敛到最后一列，不会越界抛错
+        assertEquals(1, TextureStripCrop.columnIndexForFace(32, 16, 16, 16, 63));
+    }
+
     @Test
     public void mismatchedOrUnknownShapesAreLeftAlone() {
         assertEquals("宽不整除格宽", -1, TextureStripCrop.columnIndexForFace(100, 32, 32, 32, 0));
