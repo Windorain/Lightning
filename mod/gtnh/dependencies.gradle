@@ -16,8 +16,8 @@
  */
 def runtimeProfile = (project.findProperty("gtnhRun.runtimeProfile") ?: "legacy").toString()
 def profileDefaults = [
-    legacy: [gt5: "5.09.52.283", structureLib: "1.4.28", gtnhLib: "0.9.62", angelica: null, notEnoughIds: "2.1.10", forestry: "4.11.15"],
-    ctm   : [gt5: "5.09.54.194", structureLib: "1.4.45", gtnhLib: "0.11.52", angelica: "2.2.16", notEnoughIds: null, forestry: "4.11.38"],
+    legacy: [gt5: "5.09.52.283", structureLib: "1.4.28", gtnhLib: "0.9.62", angelica: null, notEnoughIds: "2.1.10", forestry: "4.11.15", nhcm: "2.8.142"],
+    ctm   : [gt5: "5.09.54.194", structureLib: "1.4.45", gtnhLib: "0.11.52", angelica: "2.2.16", notEnoughIds: null, forestry: "4.11.38", nhcm: null],
 ]
 def prof = profileDefaults[runtimeProfile]
 if (prof == null) {
@@ -60,7 +60,13 @@ dependencies {
     // 版本锁步（不得随手升级）：NHCM 2.8.140 / 2.8.142 的 dependencies.gradle 钉 GT5-Unofficial 5.09.52.283，
     // 2.8.143 起跳到 5.09.52.288，2.8.147 跳到 5.09.52.294 ⇒ 与 gtnhRun.gt5Version=5.09.52.283 配套的是 2.8.142。
     // 升级 GT5U 时必须同步复核本行，否则会出现与 issue #209 同族的 NoSuchMethodError。
-    runtimeOnlyNonPublishable("com.github.GTNewHorizons:NewHorizonsCoreMod:2.8.142:dev")
+    // ctm 档不装 NHCM 2.8.142（实机复跑实测，2026-10-20）：该版本钉 GT 5.09.52.283，缺 GT 5.09.54.194
+    // 期望的 Piko/Quantum/PlanckCircuit（tectech MTEHatchRack 在 NHCM 已加载时无条件 getModItem 读它们 ⇒
+    // null ⇒ tectech init NPE ⇒ gtnhintergalactic 连坐跳过 ⇒ PlanetarySiphon 未 set ⇒ GT init 崩）。
+    // #87 验收按报告人同期基线（无 NHCM，87 mods）复原；验收树 dfc30716 同结论。
+    if (prof.nhcm != null) {
+        runtimeOnlyNonPublishable("com.github.GTNewHorizons:NewHorizonsCoreMod:${prof.nhcm}:dev")
+    }
     runtimeOnlyNonPublishable("net.industrial-craft:industrialcraft-2:2.2.828-experimental:dev")
     runtimeOnlyNonPublishable("com.github.GTNewHorizons:NotEnoughItems:2.8.68-GTNH:dev")
     runtimeOnlyNonPublishable("com.github.GTNewHorizons:GTNHLib:${gtnhLibVer}:dev")
