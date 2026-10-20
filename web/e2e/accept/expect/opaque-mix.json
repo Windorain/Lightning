@@ -1,0 +1,75 @@
+{
+  "schema": "lightning.accept.expect/1",
+  "scene": "opaque-mix",
+  "compare": {
+    "pairs": "all-cameras",
+    "normalize": "per-face-luminance",
+    "exclude": [
+      "sky"
+    ],
+    "thresholds": {
+      "silhouetteIoU": 0.98,
+      "faceColorDelta": 0.06,
+      "seamEdgeMax": 0
+    }
+  },
+  "checks": [
+    {
+      "kind": "region",
+      "id": "stone-face",
+      "at": [
+        0,
+        0,
+        0
+      ],
+      "face": "+z",
+      "expect": "not-background"
+    },
+    {
+      "kind": "region",
+      "id": "glowstone-face",
+      "at": [
+        3,
+        0,
+        0
+      ],
+      "face": "+z",
+      "expect": "not-background"
+    },
+    {
+      "kind": "region",
+      "id": "slab-top-gap",
+      "at": [
+        4,
+        0,
+        0
+      ],
+      "face": "+y",
+      "expect": "background"
+    },
+    {
+      "kind": "opaque",
+      "id": "chest",
+      "at": [
+        2,
+        0,
+        1
+      ],
+      "expect": "not-background"
+    },
+    {
+      "kind": "opaque",
+      "id": "pipe",
+      "at": [
+        3,
+        0,
+        1
+      ],
+      "expect": "not-background"
+    },
+    {
+      "kind": "silhouette",
+      "id": "pair-silhouette"
+    }
+  ]
+}

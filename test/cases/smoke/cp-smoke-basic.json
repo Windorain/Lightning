@@ -1,0 +1,64 @@
+{
+  "schema": "lightning.case/1",
+  "id": "cp-smoke-basic",
+  "label": "控制面冒烟：虚空托管世界 + 3 石 + 1 箱子（TE 补全）",
+  "world": {
+    "folder": "cp_smoke_basic",
+    "seed": 20261006,
+    "void": true,
+    "base": [64, 12, 64],
+    "settleTicks": 60
+  },
+  "build": [
+    { "op": "clear", "from": [64, 11, 64], "to": [70, 14, 70] },
+    { "op": "block", "at": "base+[0,0,0]", "id": "minecraft:stone", "meta": 0 },
+    { "op": "block", "at": "@base", "offset": [1, 0, 0], "id": "minecraft:stone", "meta": 0 },
+    { "op": "block", "at": [66, 12, 64], "id": "minecraft:stone", "meta": 0 },
+    { "op": "block", "at": "base+[0,0,1]", "id": "minecraft:chest", "meta": 0 },
+    { "op": "te", "at": "base+[0,0,1]", "completer": "vanilla", "params": {} },
+    { "op": "wait", "ticks": 20 }
+  ],
+  "criteria": [
+    {
+      "id": "scene-manifest-exists",
+      "type": "artifact-exists",
+      "params": { "path": "world/scene-manifest.json" }
+    },
+    {
+      "id": "observation-nonempty",
+      "type": "artifact-nonempty",
+      "params": { "path": "observation.json", "minBytes": 1 }
+    },
+    {
+      "id": "case-segment-emitted",
+      "type": "event-emitted",
+      "params": { "kind": "case-segment", "minCount": 1 }
+    },
+    {
+      "id": "observation-schema",
+      "type": "json-field",
+      "params": { "path": "observation.json", "pointer": "/schema" },
+      "expect": "lightning.observation/1"
+    }
+  ],
+  "variants": [
+    {
+      "id": "neg-manifest-missing",
+      "mutate": [
+        {
+          "op": "replace",
+          "path": "/criteria/0/params/path",
+          "value": "world/absent-scene-manifest.json"
+        }
+      ],
+      "expectCriteriaRed": ["scene-manifest-exists"]
+    }
+  ],
+  "evidence": {
+    "expect": [
+      { "path": "observation.json", "role": "observation" },
+      { "path": "criteria.json", "role": "criteria" },
+      { "path": "world/scene-manifest.json", "role": "scene-manifest" }
+    ]
+  }
+}

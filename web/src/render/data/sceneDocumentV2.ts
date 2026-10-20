@@ -1,7 +1,7 @@
 // web/src/render/data/sceneDocumentV2.ts
 // V2 = V1 原样继承 + 注解 + 标签。V1 字段名/类型全保留，迁移零转换。
 
-import type { Frame, MaterialPaletteEntry, BlockPaletteEntry } from '../schema/types'
+import type { Frame, MaterialPaletteEntry, BlockPaletteEntry, TextureBlobPool } from '../schema/types'
 
 // ============================================================
 // 基础
@@ -87,7 +87,8 @@ export interface V2PlainSceneDocument {
   description?: string | null
   modSource?: string
   globalConfig?: Record<string, unknown>
-  textureBlobs?: string[]
+  /** 根级纹理池；**两种契约形态**（对象 = 帧为主投影产物，数组 = 内核材质面/多方块），见 `../schema/types#TextureBlobPool` */
+  textureBlobs?: TextureBlobPool
   tooltipPalette?: string[]
   materialPalette?: MaterialPaletteEntry[]
   blockPalette?: BlockPaletteEntry[]

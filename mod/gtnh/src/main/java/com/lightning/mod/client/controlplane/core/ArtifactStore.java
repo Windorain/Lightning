@@ -450,15 +450,30 @@ public final class ArtifactStore {
         return runId.matches(RUN_ID_PATTERN);
     }
 
+    /**
+     * 从磁盘 {@code manifest.json} 还原一个 run。
+     *
+     * <p>
+     * <b>元数据也要读回</b>（{@code caseId}/{@code jobSeq}/{@code createdAt}）：manifest 里本来就写着
+     * 它们（{@link #manifestJson}），只在内存里认账的话，「按 caseId 发现某个 run」这类查询对
+     * 已完成（或重启前）的 run 全部失效——而恰恰是那些 run 才是要事后核对的。
+     * 实测症状（issue #98 的 {@code read.run}）：重启后枚举历史 run，{@code caseId} 全是 null、
+     * {@code jobSeq} 全是 0，而 manifest 里数据俱全。
+     */
     private Run loadFromDisk(String runId, Path dir) {
         Path manifest = dir.resolve("manifest.json");
-        Run run = new Run(runId, null, 0, dir, null);
         if (!Files.isRegularFile(manifest)) {
-            return run;
+            return new Run(runId, null, 0, dir, null);
         }
         try {
             String text = new String(Files.readAllBytes(manifest), StandardCharsets.UTF_8);
             JsonObject o = Json.parseStrictObject(text);
+            Run run = new Run(
+                runId,
+                Json.optString(o, "caseId", null),
+                Json.optLong(o, "jobSeq", 0L),
+                dir,
+                Json.optString(o, "createdAt", null));
             JsonArray arr = Json.optArray(o, "artifacts");
             if (arr != null) {
                 for (int i = 0; i < arr.size(); i++) {
@@ -481,12 +496,14 @@ public final class ArtifactStore {
                             Json.optString(a, "role", null)));
                 }
             }
+            return run;
         } catch (IOException e) {
             warn("读取 manifest 失败: " + runId + " / " + e.getMessage());
         } catch (RuntimeException e) {
             warn("manifest 内容非法: " + runId + " / " + e.getMessage());
         }
-        return run;
+        // 解析失败：退化为「只有目录、没有清单」的 run（不吞掉这个 run 本身——目录确实在）
+        return new Run(runId, null, 0, dir, null);
     }
 
     private static String sanitizeCaseId(String caseId) {

@@ -10,11 +10,12 @@
  *     因此经生产 `WorkspaceTabs` 的 DOM click 切入 Wiki 工作区 —— 这就是生产用户
  *     查看嵌入预览的同一路径，不是测试壳。
  *  2. **DOM 事件注入**：`injectHoverAtCellLocal()` 把「格内局部坐标」经**视口实际
- *     相机**（公开观测 `ctx.viewports.get('r-wiki-preview').camera`，正交）投影到
+ *     相机**（公开观测 `ctx.viewports.get(rid).camera`，正交；`rid` 缺省为 Wiki 预览，
+ *     可传 `r-viewport` 复用同一注入路径）投影到
  *     client 坐标，再在视口 DOM 元素上派发 `pointermove` —— 与 `viewportBinder`
  *     的生产监听（capture 阶段 `pointermove` → `ed.dispatch`）同一路径。
  *     投影与派发在**同一次 evaluate** 内完成，相机在两者之间不可能移动。
- *  3. **公开观测**：`window.__vm__` → `ctx.viewports.get('r-wiki-preview')` 的
+ *  3. **公开观测**：`window.__vm__` → `ctx.viewports.get(rid)` 的
  *     `camera/domElement/definition/contentGroup`（公开字段，与 `context/queries.ts`
  *     拾取链读的是同一份），加上 `ctx.region('r-wiki-preview').state.hover`
  *     （hoverHandler 写入的公开悬停状态，`viewportBlock.part` 即部件命中信息）
@@ -35,6 +36,37 @@ export const WIKI_EMBED = '.wb-wiki-embed'
 /** 视口 tooltip（`ToolTipBox.vue`，Teleport 到 body）。 */
 export const TOOLTIP_BOX = '.wm-tooltip-box'
 
+/**
+ * Wiki 预览里**作用域化**的视口选择器。
+ *
+ * `.vc-viewport` 是**全文档**类名：工作台视口（`WorkbenchViewport`，
+ * region `r-viewport`）与 Wiki 预览视口（`EmbedViewport`，region
+ * `r-wiki-preview`）都用它。P6 之前只有前者会被 `v-show` 保活，
+ * 后者按 `v-if` 挂卸；P6 把保活改成显式生命周期后两端的挂载语义一致，
+ * 于是"取第一个"的含混必须消除 —— 判据要的是"Wiki 嵌入里的那个"。
+ */
+export const WIKI_VIEWPORT = `${WIKI_EMBED} .vc-viewport`
+
+/**
+ * 截取 **Wiki 预览视口**（P6 e2e 审计的 must-fix #1）。
+ *
+ * ## 为什么不能用 `page.locator('.vc-viewport').first()`
+ *
+ * `.first()` 有一个致命性质：**它从不在多重匹配时报错**，而是静默取
+ * DOM 顺序第一个。这正是 AGENTS.md 记录的那次事故：
+ * `parts-outline-b1.spec.ts` 的 `.vc-viewport').first()` 在 `v-show` 保活下
+ * 选到了 `display:none` 的工作台视口，`locator.screenshot()` 于是在
+ * actionability 上等 → **180s 超时**。
+ *
+ * 作用域化之外还要**断言唯一性**：作用域内若仍有两个匹配，说明 Wiki 工作区里
+ * 真出现了两个视口 —— 那是需要响亮报错的结构问题，不是"随便挑一个"。
+ */
+export async function screenshotWikiViewport(page: Page, path: string): Promise<void> {
+  const vp = page.locator(WIKI_VIEWPORT)
+  await expect(vp, 'Wiki 预览必须恰好有一个视口（不得靠 .first() 静默挑选）').toHaveCount(1)
+  await vp.screenshot({ path })
+}
+
 // ---------------------------------------------------------------------------
 // 入口：Workbench → 注入场景 → Wiki 工作区就绪
 // ---------------------------------------------------------------------------
@@ -51,11 +83,21 @@ export async function waitWikiViewportReady(
   timeout = 60_000,
   requireMesh = true,
 ): Promise<void> {
-  await expect(page.locator(`${WIKI_EMBED} .vc-viewport canvas`)).toBeVisible({ timeout })
+  // 作用域化（P6）：问的是"Wiki 嵌入里的 canvas"，不是"全文档第一个 canvas"
+  await expect(page.locator(`${WIKI_VIEWPORT} canvas`)).toBeVisible({ timeout })
   await page.waitForFunction(
     (rid) => {
       const ctx = (window as any).__vm__
       const slot = ctx?.viewports?.get(rid)
+      /**
+       * P6：除"字段非空"外，还要求槽位**活着**。
+       *
+       * 旧实现卸载视口时只解绑监听，不清槽位 —— 于是 `camera`/`definition`/
+       * `domElement` 都还指向已 dispose 的句柄，本等待会对**一个死视口**成立。
+       * `runtime/viewportManager.ts` 现在在卸载时归零槽位，并导出判据
+       * `isSlotLive`（= `camera` 与 `domElement` 同时非空）。
+       * 这里就用那个判据的等价形式（页面内不能 import 模块，故内联同一条件）。
+       */
       return !!slot?.camera?.value && !!slot?.definition?.value && !!slot?.domElement?.value
     },
     WIKI_REGION,
@@ -137,7 +179,11 @@ export interface InjectedPointer {
  * 世界偏移与网格生成互逆（`structureGeometryUVs.ts`：ox = col - w/2，
  * oy = worldY - h/2，oz = z - d/2；worldY = h-1-row）。
  */
-export async function injectHoverAtCellLocal(page: Page, pt: CellLocalPoint): Promise<InjectedPointer> {
+export async function injectHoverAtCellLocal(
+  page: Page,
+  pt: CellLocalPoint,
+  rid: string = WIKI_REGION,
+): Promise<InjectedPointer> {
   return await page.evaluate(
     ({ rid, pt }) => {
       const ctx = (window as any).__vm__
@@ -179,12 +225,66 @@ export async function injectHoverAtCellLocal(page: Page, pt: CellLocalPoint): Pr
       )
       return { clientX, clientY, world: p }
     },
-    { rid: WIKI_REGION, pt },
+    { rid, pt },
   )
 }
 
-/** 移出视口（生产 `pointerleave` 路径 → hover.clearViewport()），清理两次探测之间的悬停态。 */
-export async function clearWikiHover(page: Page): Promise<void> {
+/**
+ * 把格内局部点经视口当前正交相机投影到 **client 坐标**（不派发任何事件）。
+ *
+ * 与 {@link injectHoverAtCellLocal} 同一套投影数学（世界偏移与网格生成互逆：
+ * `ox = col - w/2`、`oy = worldY - h/2`、`oz = z - d/2`；worldY = h-1-row），
+ * 但**只算不派发** —— 供需要真实输入设备的判据（`page.mouse.click`，
+ * 见 `kernel-click-pick.spec.ts`）在 Node 侧拿到坐标。
+ *
+ * ⚠️ 两者**不合并**：注入版把投影与派发放在同一次 evaluate 内，是为了保证
+ * "相机在两者之间不可能移动"；若先取坐标再回 Node 派发，中间可能发生相机 fit。
+ * 真实输入判据本身要求"鼠标真的移动/点击"，因此这里接受这一点，并在
+ * 采样前后复核 hover 返回的 voxel（以拾取实际结果为准，不硬编码坐标）。
+ */
+export async function projectCellLocal(
+  page: Page,
+  pt: CellLocalPoint,
+  rid: string,
+): Promise<InjectedPointer> {
+  return await page.evaluate(
+    ({ rid, pt }) => {
+      const ctx = (window as any).__vm__
+      const slot = ctx.viewports.get(rid)
+      const cam = slot.camera.value
+      const el = slot.domElement.value as HTMLElement
+      const g = slot.definition.value.cellGrid as number[][][]
+      const d = g.length
+      const h = g[0]!.length
+      const w = g[0]![0]!.length
+      const worldY = h - 1 - pt.row
+      const p = { x: pt.col - w / 2 + pt.lx, y: worldY - h / 2 + pt.ly, z: pt.z - d / 2 + pt.lz }
+      const mul = (m: number[], v: [number, number, number, number]): [number, number, number, number] => [
+        m[0]! * v[0] + m[4]! * v[1] + m[8]! * v[2] + m[12]! * v[3],
+        m[1]! * v[0] + m[5]! * v[1] + m[9]! * v[2] + m[13]! * v[3],
+        m[2]! * v[0] + m[6]! * v[1] + m[10]! * v[2] + m[14]! * v[3],
+        m[3]! * v[0] + m[7]! * v[1] + m[11]! * v[2] + m[15]! * v[3],
+      ]
+      cam.updateMatrixWorld()
+      const view = mul(cam.matrixWorldInverse.elements, [p.x, p.y, p.z, 1])
+      const clip = mul(cam.projectionMatrix.elements, view)
+      const ndc = { x: clip[0] / clip[3], y: clip[1] / clip[3] }
+      const rect = el.getBoundingClientRect()
+      return {
+        clientX: rect.left + ((ndc.x + 1) / 2) * rect.width,
+        clientY: rect.top + ((1 - ndc.y) / 2) * rect.height,
+        world: p,
+      }
+    },
+    { rid, pt },
+  )
+}
+
+/**
+ * 移出视口（生产 `pointerleave` 路径 → hover.clearViewport()），清理两次探测之间的悬停态。
+ * `rid` 缺省为 Wiki 预览；工作台视口判据传 `r-viewport`。
+ */
+export async function clearWikiHover(page: Page, rid: string = WIKI_REGION): Promise<void> {
   await page.evaluate((rid) => {
     const el = (window as any).__vm__?.viewports?.get(rid)?.domElement?.value as HTMLElement | undefined
     el?.dispatchEvent(
@@ -196,7 +296,7 @@ export async function clearWikiHover(page: Page): Promise<void> {
         isPrimary: true,
       }),
     )
-  }, WIKI_REGION)
+  }, rid)
 }
 
 // ---------------------------------------------------------------------------
@@ -210,8 +310,11 @@ export interface WikiHoverObservation {
   part: { localId: string; displayName: string; tooltip: string[] } | null
 }
 
-/** 读 Wiki 预览 region 的公开悬停状态（`hoverHandler` 写入；未悬停方块 ⇒ null）。 */
-export async function readWikiHover(page: Page): Promise<WikiHoverObservation | null> {
+/**
+ * 读 region 的公开悬停状态（`hoverHandler` 写入；未悬停方块 ⇒ null）。
+ * `rid` 缺省为 Wiki 预览；工作台视口判据传 `r-viewport`。
+ */
+export async function readWikiHover(page: Page, rid: string = WIKI_REGION): Promise<WikiHoverObservation | null> {
   return await page.evaluate((rid) => {
     const hover = (window as any).__vm__?.region(rid)?.state.hover
     const vb = hover?.viewportBlock?.value ?? null
@@ -221,7 +324,7 @@ export async function readWikiHover(page: Page): Promise<WikiHoverObservation | 
       voxel: vb.voxel ?? null,
       part: vb.part ? { localId: vb.part.localId, displayName: vb.part.displayName, tooltip: [...vb.part.tooltip] } : null,
     }
-  }, WIKI_REGION)
+  }, rid)
 }
 
 /** 读 tooltip DOM 文本（`.wm-tooltip-box`；未显示 ⇒ null）。 */

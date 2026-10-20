@@ -12,7 +12,10 @@ const props = defineProps<{
 const ctx = useContext()
 
 function onClick() {
-  ctx.getOperators().exec(props.opId, props.operatorProps ?? {})
+  // 算子 exec 现在会把失败抛给调用方（导出可见性）；按钮必须接住，
+  // 不能变成 unhandled rejection。
+  void Promise.resolve(ctx.getOperators().exec(props.opId, props.operatorProps ?? {}))
+    .catch((e) => { ctx.log.error('Operator', `${props.opId} 失败: ${String(e)}`) })
 }
 </script>
 
@@ -28,7 +31,7 @@ function onClick() {
     :title="title ?? label"
     @click="onClick"
   >
-    <span v-if="icon" class="ux-icon" v-html="icon"></span>
+    <span v-if="icon" class="ux-icon">{{ icon }}</span>
     <template v-if="label">{{ label }}</template>
   </button>
 </template>

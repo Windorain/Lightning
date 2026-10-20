@@ -23,7 +23,7 @@ public final class CaptureSpec {
     /** 光照口径：不干预光照管线（默认）。 */
     public static final String LIGHTING_NATURAL = "natural";
 
-    /** 光照口径：注入中性光照使暗部可读（契约 §4.2.6 的「豁免一」）。 */
+    /** 光照口径：注入中性光照使暗部可读（契约 §4.3.6 的「豁免一」）。 */
     public static final String LIGHTING_NEUTRAL_FLAT = "neutral-flat";
 
     /** 渲染模式：本色（默认）。 */

@@ -7,7 +7,6 @@ import { defaultEmbedUi } from '@/viewer/viewerConfig'
 import { getDevSceneDocument, listDevSceneIds } from '@/dev/devScenes'
 import { DEFAULT_PREVIEW_SCENE_ID, loadPreviewSessionFromDocument } from '@/viewer/viewerSession'
 import { sceneStableStringIdFromDocument } from '@/render/data/compactSceneDocument'
-import { buildMaterialLibrary } from '@/render/data/buildMaterialLibrary'
 
 function parseBool(s: string | null): boolean | undefined {
   if (s === null || s === '') return undefined
@@ -86,7 +85,7 @@ function parseUrlPreviewParams(
   return out
 }
 
-const defaultDevPreviewBase: Omit<View3DConfig, 'renderBundle' | 'materialLibrary' | 'sceneId'> = {
+const defaultDevPreviewBase: Omit<View3DConfig, 'renderBundle' | 'sceneId'> = {
   ...defaultEmbedUi,
   features: {
     ...defaultEmbedUi.features,
@@ -106,7 +105,7 @@ export async function resolveDevView3DConfigAsync(): Promise<View3DConfig> {
   const url = parseUrlPreviewParams()
   const { features: urlFeatures, ...urlRest } = url
 
-  const mergedBase: Omit<View3DConfig, 'renderBundle' | 'materialLibrary' | 'sceneId'> = {
+  const mergedBase: Omit<View3DConfig, 'renderBundle' | 'sceneId'> = {
     ...defaultDevPreviewBase,
     ...urlRest,
     features: {
@@ -122,7 +121,10 @@ export async function resolveDevView3DConfigAsync(): Promise<View3DConfig> {
   const sceneId = resolveSceneId({ ...mergedBase, ...url })
   const document = getDevSceneDocument(sceneId)
   const { renderBundle } = await loadPreviewSessionFromDocument(document)
-  const materialLibrary = await buildMaterialLibrary(renderBundle.document)
+  // M8-5：**不**在这里建材质库 ——
+  // ① 配置字段本来就没有消费者（视口用 DRW 内部按已解码像素装配的图标库）；
+  // ② 这里的 `buildMaterialLibrary` 曾是一条**独立解码链**（第二解码链），
+  //    解码只允许存在一处（`composition/kernelTextureResources` + 适配层解码器）。
   const stableId = sceneStableStringIdFromDocument(renderBundle.document)
   const docId = stableId !== 'scene' ? stableId : sceneId
 
@@ -134,7 +136,6 @@ export async function resolveDevView3DConfigAsync(): Promise<View3DConfig> {
     },
     sceneId: typeof docId === 'string' && docId.length > 0 ? docId : sceneId,
     renderBundle,
-    materialLibrary,
     okMessage: mergedBase.okMessage ?? defaultEmbedUi.okMessage,
     loadingMessage: mergedBase.loadingMessage ?? defaultEmbedUi.loadingMessage,
   }

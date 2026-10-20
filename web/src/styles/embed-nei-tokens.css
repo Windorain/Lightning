@@ -25,7 +25,16 @@
   font-display: swap;
 }
 
-:root {
+/**
+ * 暗色（默认）值。
+ *
+ * `[data-lk-theme="dark"]` 与 `:root` 同列：亮色块（文件末尾）用
+ * `[data-nei-theme="light"], [data-lk-theme="light"]`，而暗色原先只有 `:root`
+ * ⇒ dark 实例嵌在 light 祖先里时会继承到亮色变量（P10 #261 收口 F2）。
+ * 补上这半边后，标了 dark 的元素会重新确立暗色值，与祖先主题无关。
+ */
+:root,
+[data-lk-theme="dark"] {
   /* Panel hierarchy */
   --nei-bg-deep: #0a0e18;
   --nei-bg-panel: #1a1e28;
@@ -230,7 +239,10 @@
 }
 
 /* ---- Daylight / Light Theme ---- */
-[data-nei-theme="light"] {
+/* `[data-lk-theme]`：P8（#259 A33）新增的**实例作用域**选择器（沿 DOM 继承，
+   同页多实例各持主题）；`[data-nei-theme]`（文档根）保留为既有路径。 */
+[data-nei-theme="light"],
+[data-lk-theme="light"] {
   /* Panel hierarchy */
   --nei-bg-deep: #b0b0b0;
   --nei-bg-panel: #c6c6c6;

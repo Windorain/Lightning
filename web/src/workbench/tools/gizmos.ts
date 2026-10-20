@@ -216,7 +216,11 @@ export class MoveGizmo implements ToolGizmo {
     this.setVisible(showGizmo)
 
     // 模态拖拽期间跳过定位，由 OPERATOR_MOVE.modal() 控制 gizmo 位置
-    if (showGizmo && ctx.modalDepth('r-viewport') === 0) {
+    //
+    // M4-1：模态栈按 **region** 分开（`wm.events.modalDepth(region)`），故这里必须问
+    // **本 gizmo 所在视口**的那个栈 —— 写死 'r-viewport' 会让第二区的 gizmo 在
+    // 第一区有模态时误判"正在拖拽"（位置不再跟随，表现为拖了不动）。
+    if (showGizmo && ctx.modalDepth(ctx.viewport.id) === 0) {
       let cx = 0, cy = 0, cz = 0
       let valid = 0
       for (const item of items) {
@@ -288,7 +292,7 @@ export class MoveGizmo implements ToolGizmo {
         screenDirX: proj.screenDirX,
         screenDirY: proj.screenDirY,
         k: proj.k,
-      }, event)
+      }, event, ctx.viewport.id)
     } else {
       // Plane drag (xy, xz, yz)
       const a1 = AXES[hit[0]]
@@ -300,7 +304,7 @@ export class MoveGizmo implements ToolGizmo {
         gizmo: this,
         screenDirX1: proj1.screenDirX, screenDirY1: proj1.screenDirY, k1: proj1.k,
         screenDirX2: proj2.screenDirX, screenDirY2: proj2.screenDirY, k2: proj2.k,
-      }, event)
+      }, event, ctx.viewport.id)
     }
   }
 

@@ -19,7 +19,6 @@ import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
 import com.google.gson.JsonPrimitive;
 import com.lightning.mod.client.export.SceneEnvelopeBuilder;
 import com.lightning.mod.config.SdeMultiblockConfig;
@@ -54,7 +53,6 @@ import cpw.mods.fml.relauncher.SideOnly;
 @SideOnly(Side.CLIENT)
 public final class MultiblockExportRunner {
 
-    public static final String TRIGGER_FILE = "sde_multiblock.json";
     public static final String SCHEMA = "lightning.multiblock.export/1";
     public static final String REPORT_FILE = "export-report.json";
     /** 中间数据集子目录（相对产物目录）。 */
@@ -68,13 +66,23 @@ public final class MultiblockExportRunner {
 
     // ------------------------------------------------------------------ 运行配置
 
-    /** 一次导出的运行参数（来自触发文件或 {@code /sde multiblock} 的范围参数）。 */
+    /** 一次导出的运行参数（来自 {@code /sde multiblock} 命令或 cp 的 {@code export.multiblock} 动作）。 */
     public static final class RunConfig {
 
         /** 范围：simpleName 或 fqcn；空 = 全部（受 {@link #maxExportMachines} 约束）。 */
         public final List<String> machines = new ArrayList<String>();
         /** 显式通道抽样（机 simpleName → 通道 id → 0..K 连续前缀）；缺省走自动规划。 */
         public final Map<String, Map<String, List<Integer>>> channelSample = new LinkedHashMap<String, Map<String, List<Integer>>>();
+        /**
+         * 自毁退出 / 删触发文件：<b>老触发文件通道的遗留开关</b>（见 {@link VariantCaptureRunner.Config} 的同类字段）。
+         *
+         * <p>
+         * #104 之前由 {@code sde_multiblock.json} 给出、由 {@code MultiblockExportAutomation} 消费；
+         * 该通道与 {@code readConfig(mc)} 已随 #104 删除，因此这里不再有写入者。
+         * 保留是因为控制面通道按 contract.md §9 的纪律显式置 false
+         * （{@code ExportMultiblockAction} 的 {@code rc.exit=false / rc.cleanupTrigger=false}），
+         * 而这条纪律需要字段存在才能表达。
+         */
         public boolean exit = true;
         public boolean cleanupTrigger = true;
         /** -1 = 用配置默认值。 */
@@ -85,78 +93,42 @@ public final class MultiblockExportRunner {
         public long globalBudgetMs = -1;
         public String outputDirName = "";
         public boolean keepDataset = true;
-        /** 请求者（命令）/来源（触发文件），写进报告。 */
-        public String requestedBy = "trigger-file";
-    }
-
-    public static File triggerFile(Minecraft mc) {
-        return new File(mc.mcDataDir, TRIGGER_FILE);
-    }
-
-    public static RunConfig readConfig(Minecraft mc) {
-        RunConfig c = new RunConfig();
-        File f = triggerFile(mc);
-        if (!f.isFile()) return c;
-        try {
-            JsonObject o = new JsonParser().parse(VariantCaptureRunner.readText(f))
-                .getAsJsonObject();
-            if (o.has("exit")) c.exit = o.get("exit")
-                .getAsBoolean();
-            if (o.has("cleanupTrigger")) c.cleanupTrigger = o.get("cleanupTrigger")
-                .getAsBoolean();
-            if (o.has("maxVariantsPerMachine")) c.maxVariantsPerMachine = o.get("maxVariantsPerMachine")
-                .getAsInt();
-            if (o.has("maxChannelValues")) c.maxChannelValues = o.get("maxChannelValues")
-                .getAsInt();
-            if (o.has("maxExportMachines")) c.maxExportMachines = o.get("maxExportMachines")
-                .getAsInt();
-            if (o.has("structuralOnly")) c.structuralOnly = o.get("structuralOnly")
-                .getAsBoolean() ? 1 : 0;
-            if (o.has("globalBudgetMs")) c.globalBudgetMs = o.get("globalBudgetMs")
-                .getAsLong();
-            if (o.has("outputDirName")) c.outputDirName = o.get("outputDirName")
-                .getAsString();
-            if (o.has("keepDataset")) c.keepDataset = o.get("keepDataset")
-                .getAsBoolean();
-            if (o.has("requestedBy")) c.requestedBy = o.get("requestedBy")
-                .getAsString();
-            if (o.has("machines") && o.get("machines")
-                .isJsonArray()) {
-                for (JsonElement e : o.getAsJsonArray("machines")) c.machines.add(e.getAsString());
-            }
-            if (o.has("channelSample") && o.get("channelSample")
-                .isJsonObject()) {
-                for (Map.Entry<String, JsonElement> me : o.getAsJsonObject("channelSample")
-                    .entrySet()) {
-                    if (!me.getValue()
-                        .isJsonObject()) continue;
-                    Map<String, List<Integer>> perMachine = new LinkedHashMap<String, List<Integer>>();
-                    for (Map.Entry<String, JsonElement> ce : me.getValue()
-                        .getAsJsonObject()
-                        .entrySet()) {
-                        if (!ce.getValue()
-                            .isJsonArray()) continue;
-                        List<Integer> vals = new ArrayList<Integer>();
-                        for (JsonElement ve : ce.getValue()
-                            .getAsJsonArray()) vals.add(Integer.valueOf(ve.getAsInt()));
-                        perMachine.put(ce.getKey(), vals);
-                    }
-                    c.channelSample.put(me.getKey(), perMachine);
-                }
-            }
-        } catch (Throwable t) {
-            FMLLog.warning("[SDE][T1.5] 触发文件解析失败，使用默认配置: %s", t.toString());
-        }
-        return c;
+        /** 请求者 / 来源，写进报告（cp 通道写 {@code cp:export.multiblock}）。 */
+        public String requestedBy = "direct";
+        /**
+         * <b>产物根目录的绝对路径覆盖</b>（Gitea #102 的 cp 通道用）。
+         *
+         * <p>
+         * #104 之前既有两条通道（触发文件 / {@code /sde multiblock} 命令）的落点都是
+         * {@code <mcDataDir>/<outputDirName>}；触发文件通道已随 #104 删除，命令通道保留。
+         * cp 的 {@code export.multiblock} 动作要求产物落<b>它自己的 run 目录</b>（裁决 6 单一归属），
+         * 而 run 目录是绝对路径，无法用「相对 mcDataDir 的目录名」表达。因此本字段为
+         * cp 通道提供覆盖口：非空时 {@code outputDirName} 被忽略，产物根直接用它。
+         *
+         * <p>
+         * 默认 null ⇒ 命令通道的落点行为<b>逐字节不变</b>。
+         */
+        public java.io.File outputRootOverride = null;
+        /**
+         * <b>产物是否落盘</b>（Gitea #102）：{@code false} 时 {@code run()} 只计算与返回报告，
+         * <b>不</b>写任何文件——用于「预算/枚举可行性试跑」与「显式校验产物形态而不落盘」。
+         *
+         * <p>
+         * 默认 true（既有行为）。cp 通道的 {@code dryRun} 参数映射到它。
+         */
+        public boolean writeOutputs = true;
     }
 
     // ------------------------------------------------------------------ 主流程
 
-    /** 触发文件入口（无人值守）。 */
-    public static JsonObject run(Minecraft mc) throws Exception {
-        return run(mc, readConfig(mc));
-    }
-
+    /**
+     * 用**显式运行配置**跑一轮导出。
+     *
+     * <p>
+     * <b>无触发文件入口</b>：{@code run(Minecraft)} 与 {@code readConfig(Minecraft)} 已随 Gitea #104
+     * 删除（老触发文件通道 {@code sde_multiblock.json} 不再存在）。本方法是唯一入口，
+     * 调用方是 {@code /sde multiblock} 的客户端半环与 cp 的 {@code export.multiblock} 动作。
+     */
     public static JsonObject run(Minecraft mc, RunConfig rc) throws Exception {
         SdeMultiblockConfig.load(new File(new File(mc.mcDataDir, "config"), "sde_multiblock.cfg"));
         long started = System.currentTimeMillis();
@@ -169,8 +141,8 @@ public final class MultiblockExportRunner {
         String outputDirName = rc.outputDirName != null && !rc.outputDirName.trim()
             .isEmpty() ? rc.outputDirName.trim() : SdeMultiblockConfig.outputDirName;
 
-        File outDir = new File(mc.mcDataDir, outputDirName);
-        if (!outDir.isDirectory() && !outDir.mkdirs()) {
+        File outDir = rc.outputRootOverride != null ? rc.outputRootOverride : new File(mc.mcDataDir, outputDirName);
+        if (rc.writeOutputs && !outDir.isDirectory() && !outDir.mkdirs()) {
             throw new IllegalStateException("无法创建产物目录: " + outDir.getAbsolutePath());
         }
 
@@ -209,6 +181,11 @@ public final class MultiblockExportRunner {
         cap.machines.clear();
         for (EnumEntry e : scope) cap.machines.add(e.fqcn);
         cap.outputDirName = outputDirName + "/" + DATASET_SUBDIR;
+        if (rc.outputRootOverride != null) {
+            // cp 通道（Gitea #102）：数据集也必须落 run 目录（裁决 6 单一归属），
+            // 因此把覆盖口一并传给 T1.3 捕获——否则数据集会写到老路径 <mcDataDir>/sde_multiblock_exports/。
+            cap.outputRootOverride = new File(rc.outputRootOverride, DATASET_SUBDIR);
+        }
         cap.includeActiveRunstate = !structuralOnly;
         cap.maxVariantsPerMachine = Math.max(2, maxVariants);
         cap.globalBudgetMs = budgetMs;
@@ -262,6 +239,48 @@ public final class MultiblockExportRunner {
                     + maxVariants
                     + "）；被收窄通道的真实域与「只覆盖声明域」这一事实已写进数据集与被收窄通道的 notes。");
         }
+
+        // ---- dryRun（Gitea #102）：只做枚举 + 抽样规划 + 预算核算，不捕获不落盘 ----
+        // 语义是「可行性试跑」：全量捕获在默认配置下是小时级，调用方需要一条便宜的路先回答
+        // 「范围对不对、组合积多大、预算够不够」。它**不**假装跑过捕获——报告里 dryRun:true 显式标注，
+        // 且 products[] 为空、captureTotals 缺失（不假造一份没发生过的捕获的统计）。
+        if (!rc.writeOutputs) {
+            JsonObject dry = baseReport(
+                rc,
+                outDir,
+                "",
+                factsFile,
+                all.size(),
+                scope.size(),
+                maxVariants,
+                maxChannelValues,
+                maxMachines,
+                structuralOnly,
+                budgetMs,
+                outputDirName);
+            dry.addProperty("status", "dry-run");
+            dry.addProperty("dryRun", true);
+            dry.addProperty(
+                "dryRunNote",
+                "writeOutputs=false：只做枚举（T1.2 事实层）+ 范围过滤 + 抽样规划 + 预算核算；"
+                    + "未执行 T1.3 捕获、未执行 T1.4 编码、未写任何产物。因此 products[] 为空、"
+                    + "captureTotals/timing.captureMs 缺失、failures[] 只含范围类失败（如未知机器名）。");
+            dry.add("products", new JsonArray());
+            dry.add("samplingPlan", samplingPlan);
+            dry.add("failures", ScanJson.objects(failures));
+            dry.add("notes", ScanJson.strings(notes));
+            JsonObject timing = new JsonObject();
+            timing.addProperty("captureMs", -1L);
+            timing.addProperty("encodeMs", -1L);
+            timing.addProperty("totalMs", Long.valueOf(System.currentTimeMillis() - started));
+            dry.add("timing", timing);
+            dry.addProperty("requestedMachines", Integer.valueOf(scope.size()));
+            dry.addProperty("enumeratedTotal", Integer.valueOf(all.size()));
+            dry.addProperty("failureCount", Integer.valueOf(failures.size()));
+            dry.addProperty("finishedAtEpochMs", Long.valueOf(System.currentTimeMillis()));
+            return dry;
+        }
+
         JsonObject captureReport = null;
         String datasetDirPath = "";
         Throwable captureFailure = null;
@@ -349,8 +368,21 @@ public final class MultiblockExportRunner {
                     stats.addProperty("datasetFile", mf.getName());
                     JsonObject envelope = envelope(mi, doc);
                     File prodFile = new File(outDir, e.slug + ".multiblock.json");
+                    if (!rc.writeOutputs) {
+                        // dryRun（Gitea #102）：只算不写。产物统计仍如实给出（否则「试跑」看不出会产出什么），
+                        // 但 bytes/sha256 缺失并显式标注——不假造一份没写过的产物的哈希。
+                        stats.addProperty("productFile", prodFile.getName());
+                        stats.addProperty("written", false);
+                        stats.addProperty("envelopeBytes", -1L);
+                        stats.addProperty("envelopeSha256", (String) null);
+                        stats.addProperty("dryRunNote", "writeOutputs=false：本份产物未落盘，故无 bytes/sha256");
+                        products.add(stats);
+                        exportedSlugs.add(e.slug);
+                        continue;
+                    }
                     writeJson(prodFile, envelope);
                     stats.addProperty("productFile", prodFile.getName());
+                    stats.addProperty("written", true);
                     stats.addProperty("envelopeBytes", Long.valueOf(prodFile.length()));
                     stats.addProperty("envelopeSha256", VariantCaptureRunner.sha256Hex(readText(prodFile)));
                     products.add(stats);
@@ -382,26 +414,23 @@ public final class MultiblockExportRunner {
         }
 
         // ---- 报告 ----
-        JsonObject report = new JsonObject();
-        report.addProperty("schema", SCHEMA);
-        report.addProperty("task", "T1.5 /sde multiblock 导出（枚举 → 变体捕获 → 因子化编码 → 信封落盘）");
+        JsonObject report = baseReport(
+            rc,
+            outDir,
+            datasetDirPath,
+            factsFile,
+            all.size(),
+            scope.size(),
+            maxVariants,
+            maxChannelValues,
+            maxMachines,
+            structuralOnly,
+            budgetMs,
+            outputDirName);
         report.addProperty("status", failures.isEmpty() ? "ok" : "has-failures");
-        report.addProperty("requestedBy", rc.requestedBy);
-        report.addProperty("outputDir", outDir.getAbsolutePath());
-        report.addProperty("datasetDir", datasetDirPath);
-        report.addProperty("factsFile", factsFile.getAbsolutePath());
-        report.addProperty("enumeratedTotal", Integer.valueOf(all.size()));
-        report.addProperty("requestedMachines", Integer.valueOf(scope.size()));
+        report.addProperty("dryRun", false);
         report.addProperty("exportedProducts", Integer.valueOf(products.size()));
         report.addProperty("failureCount", Integer.valueOf(failures.size()));
-        report.addProperty("structuralCompression", Boolean.valueOf(SdeMultiblockConfig.structuralCompression));
-        report.addProperty("structuralOnly", Boolean.valueOf(structuralOnly));
-        report.addProperty("effectiveMaxVariantsPerMachine", Integer.valueOf(maxVariants));
-        report.addProperty("effectiveMaxChannelValues", Integer.valueOf(maxChannelValues));
-        report.addProperty("effectiveMaxExportMachines", Integer.valueOf(maxMachines));
-        report.add(
-            "config",
-            configJson(maxVariants, maxChannelValues, maxMachines, structuralOnly, budgetMs, outputDirName));
         JsonObject timing = new JsonObject();
         timing.addProperty(
             "captureMs",
@@ -447,8 +476,13 @@ public final class MultiblockExportRunner {
         report.add("notes", ScanJson.strings(notes));
         report.addProperty("exportedSlugs", String.join(",", exportedSlugs));
         report.addProperty("finishedAtEpochMs", Long.valueOf(System.currentTimeMillis()));
+        // 报告本身也要落盘；dryRun 已在上面提前 return，故此处必然 writeOutputs=true。
+        // 但 cp 通道可能只想要「产物 + 报告」而不想多一份 latest-export-report.json 副本——
+        // 该副本是离线脚本的稳定名约定（老路径口径），cp 通道用 report.json 即可。
         writeJson(new File(outDir, REPORT_FILE), report);
-        writeJson(new File(outDir, "latest-export-report.json"), report);
+        if (rc.outputRootOverride == null) {
+            writeJson(new File(outDir, "latest-export-report.json"), report);
+        }
 
         if (!SdeMultiblockConfig.keepDataset && !rc.keepDataset) {
             notes.add("keepDataset=false：中间数据集保留在 " + datasetDirPath + "（本轮未删除，避免误删证据）");
@@ -679,6 +713,40 @@ public final class MultiblockExportRunner {
         return SceneEnvelopeBuilder.toEnvelope(rawFinal);
     }
 
+    /**
+     * 报告骨架（两条路径共用：正常导出与 dryRun）。
+     *
+     * <p>
+     * 抽出来是为了让 {@code dryRun} 报告与正式报告在<b>同一批字段</b>上给出同一批值——
+     * 「试跑看到的范围/预算」与「真跑用的范围/预算」若来自两处组装，就会出现「试跑说 5 台、
+     * 真跑跑 221 台」这种最难查的分叉。
+     */
+    static JsonObject baseReport(RunConfig rc, File outDir, String datasetDirPath, File factsFile, int enumeratedTotal,
+        int scopeSize, int maxVariants, int maxChannelValues, int maxMachines, boolean structuralOnly, long budgetMs,
+        String outputDirName) {
+        JsonObject report = new JsonObject();
+        report.addProperty("schema", SCHEMA);
+        report.addProperty("task", "T1.5 多方块导出（枚举 → 变体捕获 → 因子化编码 → 信封落盘）");
+        report.addProperty("requestedBy", rc.requestedBy);
+        report.addProperty("outputDir", outDir.getAbsolutePath());
+        report.addProperty(
+            "outputRootOverride",
+            rc.outputRootOverride == null ? null : rc.outputRootOverride.getAbsolutePath());
+        report.addProperty("datasetDir", datasetDirPath);
+        report.addProperty("factsFile", factsFile == null ? null : factsFile.getAbsolutePath());
+        report.addProperty("enumeratedTotal", Integer.valueOf(enumeratedTotal));
+        report.addProperty("requestedMachines", Integer.valueOf(scopeSize));
+        report.addProperty("structuralCompression", Boolean.valueOf(SdeMultiblockConfig.structuralCompression));
+        report.addProperty("structuralOnly", Boolean.valueOf(structuralOnly));
+        report.addProperty("effectiveMaxVariantsPerMachine", Integer.valueOf(maxVariants));
+        report.addProperty("effectiveMaxChannelValues", Integer.valueOf(maxChannelValues));
+        report.addProperty("effectiveMaxExportMachines", Integer.valueOf(maxMachines));
+        report.add(
+            "config",
+            configJson(maxVariants, maxChannelValues, maxMachines, structuralOnly, budgetMs, outputDirName));
+        return report;
+    }
+
     static JsonObject configJson(int maxVariants, int maxChannelValues, int maxMachines, boolean structuralOnly,
         long budgetMs, String outputDirName) {
         JsonObject o = new JsonObject();
@@ -707,9 +775,35 @@ public final class MultiblockExportRunner {
         o.addProperty("stage", stage);
         o.addProperty("kind", kind);
         o.addProperty("message", message == null ? "" : message);
-        if (t != null) o.addProperty("failure", MultiblockScanAutomation.describeChain(t));
+        if (t != null) o.addProperty("failure", describeChain(t));
         o.addProperty("atEpochMs", Long.valueOf(System.currentTimeMillis()));
         return o;
+    }
+
+    /**
+     * 异常链 + 栈顶若干帧写成一段文本：失败必须可诊断，不能只留一句「失败了」。
+     *
+     * <p>
+     * 出处：Gitea #104 之前由 {@code MultiblockScanAutomation.describeChain} 提供；那个类（连同
+     * 老触发文件入口）已随 #104 删除，而本类是那条口径的**生产消费方**（{@code export-report.json}
+     * 的 {@code failures[].failure} 字段），故把这段与实现无关的诊断原语就地保留在消费方，
+     * 逐字节保持同一输出格式。
+     */
+    private static String describeChain(Throwable t) {
+        StringBuilder sb = new StringBuilder();
+        Throwable cur = t;
+        int guard = 0;
+        while (cur != null && guard++ < 8) {
+            if (sb.length() > 0) sb.append("\n<- caused by ");
+            sb.append(cur.toString());
+            StackTraceElement[] st = cur.getStackTrace();
+            for (int i = 0; i < Math.min(st.length, 6); i++) {
+                sb.append("\n    at ")
+                    .append(st[i]);
+            }
+            cur = cur.getCause();
+        }
+        return sb.toString();
     }
 
     private static String machineOf(JsonObject failureEntry) {

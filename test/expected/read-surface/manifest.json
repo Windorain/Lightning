@@ -1,0 +1,74 @@
+{
+  "schema": "lightning.cp-expected/1",
+  "caseId": "read-surface",
+  "caseSha256": "f8ec4823378f441a69eb1016e7c2a5403dc9ec22191aa231867bfd075d882f42",
+  "_comment": "read-surface 的期望产物基准。逐产物声明比较模式（case-file.md §10.1 四选一）+ 该产物在本仓实测中可复现的值。**基准不是 run 目录的副本**：run 目录含时间戳/runId/durationMs 且体量大（一次绿 run 约 20 个产物、最大 51KB）；基准只保留「要守什么」。",
+  "generatedFrom": {
+    "runId": "20261007-082700-read-surface-3",
+    "secondRunId": "20261007-082708-read-surface-4",
+    "world": { "folder": "cp_read_surface", "seed": 20261007, "void": true, "base": [64, 12, 64], "settleTicks": 60 },
+    "contractVersion": "1.6",
+    "mod": "0.3",
+    "minecraft": "1.7.10",
+    "forge": "10.13.4.1614",
+    "_note": "基线的生成条件必须可离线解释（taxonomy 草案 §4.4 的②）：world 段逐字给出、版本给出、两个 runId 给出以便复核。"
+  },
+  "modes": {
+    "byte-equal": "逐字节相同",
+    "canonical-hash-equal": "规范化 JSON（键排序、无空白）的 sha256 相同",
+    "structural-equal": "结构相同（键集合 + 类型 + 数组长度 + 豁免归一后的值）",
+    "presence-only": "只要求存在且非空"
+  },
+  "comparison": "test/expected/compare-runs.mjs（唯一实现点；口径见 docs/control-plane/case-file.md §10）",
+  "exemptFields": {
+    "_source": "docs/control-plane/case-file.md §10.2（逐条给契约或机理出处；本表必须与脚本里的 EXEMPT_FIELDS 同源）",
+    "runId": "run 目录名含时间戳",
+    "jobId": "作业号 j<seq>，进程内单调递增",
+    "createdAt/generatedAt/recordedAt/readAt": "挂钟时间",
+    "durationMs/settleMs/serverSyncWaitedMs": "时间度量（有界但随负载浮动）",
+    "worldTime/totalWorldTime/timeOfDay/day/rainTime/thunderTime": "世界实时状态（时钟与天气调度器）",
+    "playerPos/sinceEnterMs": "实时状态",
+    "entityId": "服务端实体计数器分配",
+    "chunks.loaded / chunks.chunks": "已加载区块计数（随加载进度浮动；**按路径**豁免，同名字段 world.loaded 是布尔语义，必须比）",
+    "artifacts[].sha256 / artifacts[].bytes / steps[].artifact.{sha256,bytes} / runtimeReads[].sha256": "**按路径**豁免：指向的产物由它自己的比较模式判，在记账文档里再比一遍等于同一个量比两遍",
+    "prose: summary/detail/note/pathNote/message/reason": "人读解释文字——内容不比（它们按设计引用 runId/字节数），**结构仍比**（类型变化必红）"
+  },
+  "_intentionalNonExemptions": {
+    "mismatches": "构建留痕但**实测可复现**（两轮逐字相同）⇒ 不豁免。豁免它会致盲「同一程序两轮产出不同数量的 mismatch」这类真实漂移。",
+    "teReads": "契约明写不进清单哈希，那是哈希口径而非值不可比 ⇒ 不豁免。",
+    "sha256 (顶层)": "world/scene-manifest.json 的 sha256 恰恰是 hash-equal 要比的核心值 ⇒ **按路径**豁免而非按字段名。",
+    "world.loaded": "布尔「世界加载了没」⇒ 不豁免（与 chunks.loaded 同名字段、不同语义）。"
+  },
+  "artifacts": [
+    { "path": "criteria.json", "mode": "canonical-hash-equal", "projection": "{schema, overall, counts, criteria[].{id,type,verdict}}", "expect": { "overall": "green", "counts/green": 25, "counts/red": 0, "counts/error": 0, "criteria/0/verdict": "green", "criteria/0/type": "artifact-exists" } },
+    { "path": "evidence.json", "mode": "canonical-hash-equal", "projection": "{schema, overall, verdict}", "expect": { "overall": "green", "verdict/verdict": "green", "verdict/id": "evidence-complete" } },
+    { "path": "world/scene-manifest.json", "mode": "canonical-hash-equal", "expect": { "seed": 20261007, "void": true, "stepCount": 7, "generatorOptions": "2;0x1;1;", "blocks/0/blockId": 1, "blocks/0/meta": 0, "blocks/0/pos/0": 65 } },
+    { "path": "observation.json", "mode": "structural-equal" },
+    { "path": "manifest.json", "mode": "structural-equal" },
+    { "path": "segments/world.json", "mode": "structural-equal" },
+    { "path": "segments/capture.json", "mode": "structural-equal" },
+    { "path": "segments/build.json", "mode": "structural-equal" },
+    { "path": "segments/read.json", "mode": "structural-equal" },
+    { "path": "segments/action.json", "mode": "structural-equal" },
+    { "path": "segments/cameras.json", "mode": "structural-equal" },
+    { "path": "segments/criteria.json", "mode": "structural-equal" },
+    { "path": "segments/evidence.json", "mode": "structural-equal" },
+    { "path": "read/blocks.json", "mode": "canonical-hash-equal", "expect": { "volume": 180, "airCount": 176 } },
+    { "path": "read/te.json", "mode": "canonical-hash-equal" },
+    { "path": "read/block.json", "mode": "canonical-hash-equal" },
+    { "path": "read/player.json", "mode": "canonical-hash-equal" },
+    { "path": "read/overview.json", "mode": "canonical-hash-equal" },
+    { "path": "read/diff.json", "mode": "canonical-hash-equal" },
+    {
+      "path": "read/run.json",
+      "mode": "presence-only",
+      "_why": "**自引用产物**：read.run 枚举整个 runs/ 目录，因此必然包含本 run 自己，且条目数随 run 数单调增长（实测 1 → 2 → …）。它不是「同参同产物」，不能参与值比较。"
+    }
+  ],
+  "variants": [
+    { "id": "neg-diff-not-clean", "expectCriteriaRed": ["read-diff-clean"] },
+    { "id": "neg-blocks-volume-wrong", "expectCriteriaRed": ["read-blocks-region-volume"] },
+    { "id": "neg-tesr-flipped", "expectCriteriaRed": ["read-player-te-not-uniform"] },
+    { "id": "neg-null-becomes-wrong-value", "expectCriteriaRed": ["read-te-stone-claimed-family-is-explicit-null"] }
+  ]
+}

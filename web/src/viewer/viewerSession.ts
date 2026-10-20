@@ -17,7 +17,8 @@ export interface PreviewSessionResult {
 
 /**
  * 由打包场景 document 构建 RenderBundle（normalize + validate）。
- * 材质库不在此时构建——由 DRW mesh 管线按需调用 buildMaterialLibrary。
+ * 材质库不在此时构建——由 DRW 按**已解码像素**装配（`render/data/materialLibraryFromTextures`；
+ * M8-5 起 DRW 不再自己解码，旧 `buildMaterialLibrary` 已删除）。
  */
 export async function loadPreviewSessionFromDocument(document: unknown): Promise<PreviewSessionResult> {
   const normalized = await normalizeEnvelopeToPlain(document)

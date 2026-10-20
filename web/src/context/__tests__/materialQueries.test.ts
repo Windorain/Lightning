@@ -1,26 +1,23 @@
 import { describe, it, expect } from 'vitest'
-import { ref } from 'vue'
 import { RuntimeDocument, Grid, RuntimeFrame } from '@/context/runtimeDocument'
 import { listMaterials, getMaterialUsageCounts, getBlockTypeStats, getBlockPaletteEntry } from '@/context/queries'
 import type { Context } from '@/runtime/context'
+import { makeKernelReadHost } from '@/runtime/__tests__/kernelReadTestHost'
 
+/**
+ * 造一个查询用的最小 ctx。
+ *
+ * #301 P10f C′1：改走 `makeKernelReadHost`（**委托生产读面**）——
+ * `listMaterials` 已迁到 `ctx.kernelMaterials()`，替身必须提供该读面，
+ * 否则报 `ctx.kernelMaterials is not a function`。那是**正确的摩擦**：
+ * 生产读面变了，替身必须同步。
+ *
+ * ⚠️ 本宿主走**legacy 分支**（不装配内核）—— 与这些用例的语境一致
+ * （断言"从一份 legacy 文档能读出什么"）。内核分支由
+ * `p10fAnnotationRead.test.ts` 覆盖。
+ */
 function makeMockCtx(doc: RuntimeDocument | null): Context {
-  return {
-    getDoc: () => ref(doc),
-    getCurrentFrameIndex: () => ref(0),
-    getSelection: () => ({ items: { value: new Set() } }),
-    getViewport: () => ({
-      camera: ref(null),
-      contentGroup: ref(null),
-      domElement: ref(null),
-      definition: ref(null),
-      layerPreview: ref(null),
-      overlayGroup: ref(null),
-      toolsOverlayGroup: ref(null),
-      worldAnnotationGroup: ref(null),
-      cameraMainKey: 'workbench',
-    }),
-  } as unknown as Context
+  return makeKernelReadHost(doc).ctx
 }
 
 describe('listMaterials', () => {

@@ -241,9 +241,66 @@ export function fitOrthoFrustumToWorldBox(
   camera.top = cy + halfH
 
   const zEps = 1e-2
-  camera.near = Math.max(0.01, -maxZ + zEps)
+  // near 必须落在**最近表面之前**（-maxZ - eps），写 +eps 会把最近的一层面裁掉：
+  // 正交轴视图下那一层正是朝向相机的可见面，裁掉后只剩侧棱（面积为 0）与背面（被背面剔除）⇒ 整幅空白。
+  camera.near = Math.max(0.01, -maxZ - zEps)
   camera.far = Math.max(camera.near + 0.02, -minZ + zEps)
   camera.updateProjectionMatrix()
+}
+
+
+/**
+ * **裁剪面跟随内容包围盒**（M5-2 返工：修"机器被近裁剪面切开"）。
+ *
+ * ## 为什么需要它（真实缺陷，不是洁癖）
+ *
+ * 初始机位只在"首次框选 / 换文档"时施加（见 `runtime/viewportCameraInit` 的纪律），
+ * 那时 `fitOrthoFrustumToWorldBox` 按**当时的**包围盒算 `near/far`。之后内容**变大**
+ * （多方块拖 Height：3×2×3 → 3×5×3）而机位不动 ⇒ 盒体前表面越过旧 `near`，
+ * 屏幕上出现一道**斜切的楔形破口**（实测：可视区被切掉一大块，像渲染坏了）。
+ *
+ * ## 为什么只动裁剪面、不动框选
+ *
+ * 框选（frustum 的 left/right/top/bottom + 机位）是**用户视角**：内容变化不得重新框选
+ * （`viewportCameraInit` 的纪律，M1 实测缺陷）。而**裁剪面**是"别把东西切没"的
+ * 正确性参数 —— 它只由内容包围盒决定，跟着内容走不会移动任何可见构图
+ * （内容变大后超出视野的部分仍然按原样被视锥边缘裁掉，只是不再被近/远平面切开）。
+ *
+ * 判据：`web/e2e/builtin-multiblock-sample.spec.ts` 的"拖 Height 前后像素"用例
+ * （旧态会出现一整块楔形破口，像素分布异常）。
+ */
+export function syncClipPlanesToGroup(
+  camera: THREE.OrthographicCamera,
+  group: THREE.Object3D,
+): boolean {
+  group.updateMatrixWorld(true)
+  const box = new THREE.Box3().setFromObject(group)
+  if (box.isEmpty() || !Number.isFinite(box.min.x)) return false
+  camera.updateMatrixWorld(true)
+  const p = new THREE.Vector3()
+  let minZ = Infinity
+  let maxZ = -Infinity
+  for (const x of [box.min.x, box.max.x]) {
+    for (const y of [box.min.y, box.max.y]) {
+      for (const z of [box.min.z, box.max.z]) {
+        p.set(x, y, z).applyMatrix4(camera.matrixWorldInverse)
+        if (p.z < minZ) minZ = p.z
+        if (p.z > maxZ) maxZ = p.z
+      }
+    }
+  }
+  const zEps = 1e-2
+  // 同 fitOrthoFrustumToWorldBox：near 放在最近表面**之外**，否则最近的那层面被裁掉。
+  const near = Math.max(0.01, -maxZ - zEps)
+  const far = Math.max(near + 0.02, -minZ + zEps)
+  // 只在真的需要时写（避免每帧 updateProjectionMatrix：矩阵一致时 Three 也还要重算）。
+  const changed =
+    Math.abs(camera.near - near) > 1e-3 || Math.abs(camera.far - far) > 1e-3
+  if (!changed) return false
+  camera.near = near
+  camera.far = far
+  camera.updateProjectionMatrix()
+  return true
 }
 
 /**

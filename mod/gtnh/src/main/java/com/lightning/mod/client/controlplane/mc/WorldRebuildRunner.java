@@ -23,6 +23,7 @@ import com.lightning.mod.client.controlplane.core.Json;
  * <ol>
  * <li>离开当前世界（{@link WorldLoader#ensureLeft}）；</li>
  * <li>删除托管存档目录（<b>二次确认</b>：{@code cp_} 前缀 + 目录不存在或带 {@code cp_world.json}）；</li>
+ * <li><b>标记前置</b>：写带 {@code complete:false} 的 {@code cp_world.json}（#123，见下）；</li>
  * <li>{@code launchIntegratedServer(folder, display, WorldSettings(seed, CREATIVE, false, false, FLAT)
  * + 空层预设)}；</li>
  * <li>等进世界（超时由动作层的阶段超时给 {@code CP-EXEC-002}）；</li>
@@ -30,9 +31,30 @@ import com.lightning.mod.client.controlplane.core.Json;
  * {@link ServerBuildPump} 在<b>服务端 tick 线程</b>推进（#89 根治，评论 1689），本机只逐 tick
  * 轮询结局；</li>
  * <li>静置 {@code settleTicks}（构建段内部收尾，无构建段时本机自己等）；</li>
- * <li>写 {@code cp_world.json} 与 {@code scene-manifest.json}（存档目录 + run 目录），返回世界描述与
- * 场景清单哈希。</li>
+ * <li>标记收口：把标记改写为 {@code complete:true}，写 {@code scene-manifest.json}
+ * （存档目录 + run 目录），返回世界描述与场景清单哈希。</li>
  * </ol>
+ *
+ * <h2>标记前置（issue #123）—— 为什么必须发生在「进世界之前」</h2>
+ *
+ * <p>
+ * 标记本来就<b>只在最末的 MARKER 阶段</b>写：build 阶段失败即在存档根留下「有世界文件、无标记」
+ * 的残留，而删除与重建都要求「带标记」⇒ <b>没有任何 API 能清掉它</b>（#117 段二实机擒获 D-2，
+ * 只能手工删目录）。修法是标记前置：本阶段把 {@code complete:false} 的标记<b>先</b>落下，
+ * 构建成功后（MARKER 阶段）改写为 {@code complete:true}。
+ *
+ * <p>
+ * 前置点选在「删除之后、进世界之前」而不是「进世界之后」，理由是<b>覆盖全部失败点</b>：
+ * {@code launchIntegratedServer} 与等进世界都会写存档文件（集成服一启动就建 {@code level.dat}
+ * 与 region），若把前置点放在它们之后就仍会漏出一个「有世界文件、无标记」的窗口——而那正是
+ * 本单要消灭的状态。放在进世界之前后，ARM 之后的每个失败点（启动、等待、build、settle）
+ * 都在标记覆盖之下。ARM 自身失败（写盘失败）时目录是空的（DELETE 刚清过），不构成残留。
+ *
+ * <p>
+ * 语义（消费方必须照此判读，contract.md §6.1）：{@code complete:false} =
+ * 「曾经开始过、可以删可以重建，但<b>不得</b>当作构建完成的世界复用」——场景可能只铺了一半、
+ * TE 补全可能未完成。判据分两处：{@link ManagedWorld#hasMarker}（可以删/重建）与
+ * {@link ManagedWorld#isComplete}／{@link ManagedWorld#assertCompleteWorld}（可当成品复用）。
  *
  * <p>
  * 幂等性：同参数两次执行的场景清单 {@code sha256} 必然相等——哈希只覆盖「世界实际状态」
@@ -67,6 +89,22 @@ public final class WorldRebuildRunner {
 
         /** 已归一化的构建步骤；可为空数组（表示只重建世界、不铺场景）。 */
         public JsonArray buildSteps = new JsonArray();
+
+        /**
+         * 本段收尾时是否把标记改写为 {@code complete:true}（{@code #123}）。
+         *
+         * <p>
+         * 默认 {@code true}：{@code world.rebuild} 的构建段在本机内部，MARKER 阶段即「世界 + 场景」
+         * 都已完成，可以收口。
+         *
+         * <p>
+         * {@code case.run} 的 {@code world} 段在同一次运行里<b>后面还有一个独立的 build 段</b>，
+         * 此时必须置 {@code false}：否则世界段一收口就把标记写成 {@code complete:true}，
+         * 而随后的 build 段失败会留下「标记说完成、场景只铺了一半」的世界——那会让下游
+         * （如 {@code world.snapshot} 的成品复用门）误判为可复用。{@code case.run} 在 build 段
+         * 成功后才自行收口（见 {@code CaseRunAction.stepBuild}）。
+         */
+        public boolean markComplete = true;
     }
 
     /** 内部阶段。 */
@@ -75,6 +113,8 @@ public final class WorldRebuildRunner {
         LEAVE,
         /** 删除托管存档目录。 */
         DELETE,
+        /** 标记前置：写带 {@code complete:false} 的标记（见类注释「标记前置」）。 */
+        ARM,
         /** 启动并进入世界。 */
         ENTER,
         /** 场景构建。 */
@@ -184,6 +224,18 @@ public final class WorldRebuildRunner {
                     EventStream.Kinds.WORLD_REBUILD,
                     "托管世界已清空待重建: " + spec.folder,
                     Json.object("folder", spec.folder, "seed", Long.valueOf(spec.seed)));
+                stage = Stage.ARM;
+                return null;
+            }
+            case ARM: {
+                phase(0.2d, "arm-marker");
+                worldMarker = armMarker(mc.mcDataDir, spec.folder, spec.seed);
+                CpLog.info("已前置写托管标记（complete:false，失败残留可重建）: %s", spec.folder);
+                ctx.emit(
+                    EventStream.LEVEL_INFO,
+                    EventStream.Kinds.WORLD_REBUILD,
+                    "托管世界标记已前置（构建中）: " + spec.folder,
+                    Json.object("folder", spec.folder, "seed", Long.valueOf(spec.seed), "complete", Boolean.FALSE));
                 stage = Stage.ENTER;
                 return null;
             }
@@ -296,7 +348,7 @@ public final class WorldRebuildRunner {
                     worldDescription.addProperty("settleTicks", spec.settleTicks);
                 }
                 Path dir = ManagedWorld.requireManagedFolder(mc.mcDataDir, spec.folder, "folder");
-                worldMarker = ManagedWorld.writeMarker(dir, spec.folder, spec.seed, true);
+                worldMarker = closeMarker(dir, spec.folder, spec.seed, spec.markComplete);
                 writeSceneManifest(dir);
                 JsonObject result = result();
                 ctx.emit(
@@ -414,6 +466,43 @@ public final class WorldRebuildRunner {
         return a == null ? 0 : a.size();
     }
 
+    // ------------------------------------------------------------ 标记生命周期（可离线测的接缝）
+
+    /**
+     * <b>标记前置</b>（{@code #123}，{@link Stage#ARM} 的全部副作用）：二次确认 + 写
+     * {@code complete:false} 的标记。
+     *
+     * <p>
+     * 抽成静态方法是为了让单测<b>驱动生产路径</b>而不是自己拼一份标记：本方法的调用序
+     * （先 {@code assertDeletable} 再写盘）正是安全属性所在，测试直接调它才锁得住。
+     *
+     * @return 落盘的标记对象
+     * @throws CpException CP-STATE-001 目录未过删除确认（无标记且非空）；CP-IO-001 写盘失败
+     */
+    public static JsonObject armMarker(java.io.File mcDataDir, String folder, long seed) {
+        Path dir = ManagedWorld.requireManagedFolder(mcDataDir, folder, "folder");
+        ManagedWorld.assertDeletable(dir, folder, "world.rebuild");
+        return ManagedWorld.writeMarker(dir, folder, seed, true, false);
+    }
+
+    /**
+     * <b>标记收口</b>（{@link Stage#MARKER} 的标记部分）：把前置的 {@code complete:false} 改写为
+     * {@code complete:true}；{@code markComplete=false} 时保持未完成（{@code case.run} 后面还有
+     * 独立 build 段的场景，见 {@link Spec#markComplete}）。
+     *
+     * @return 收口后的标记对象（保持未完成时为当前标记）
+     */
+    public static JsonObject closeMarker(Path dir, String folder, long seed, boolean markComplete) {
+        if (!markComplete) {
+            // 本段后面还有独立的 build 段（case.run）：保持 complete:false，由 build 段收口。
+            CpLog.info("本段不收口标记（后面还有 build 段）: %s 保持 complete:false", folder);
+            return ManagedWorld.readMarker(dir);
+        }
+        // 标记收口（#123）：ARM 阶段的前置标记在此翻为 complete:true。此后本目录才允许被当作
+        // 「构建完成的成品世界」复用（如 world.snapshot 整目录复制）。
+        return ManagedWorld.promoteMarker(dir, folder, seed, true);
+    }
+
     /** 供动作层把 {@code base} 传给 {@link WorldLoader}。 */
     public int[] base() {
         return spec.base == null ? null : spec.base.clone();
@@ -424,7 +513,14 @@ public final class WorldRebuildRunner {
         return ManagedWorld.requireManagedFolder(mcDataDir, folder, "folder");
     }
 
-    /** 供动作层做「非托管世界拒绝写」的前置判断。 */
+    /**
+     * 供动作层做「非托管世界拒绝写」的前置判断（安全属性：<b>无标记的目录一律拒绝</b>）。
+     *
+     * <p>
+     * 判据刻意保持为「有没有标记」而不看 {@code complete}：本方法的职责是安全边界（不碰非托管
+     * 目录），不是可用性边界。带 {@code complete:false} 标记的失败残留<b>允许通过</b>——
+     * 它正是 #123 要救回的那类目录，重跑重建会自行删除并重建它。
+     */
     public static void assertManagedIfExists(java.io.File mcDataDir, String folder) {
         Path dir = ManagedWorld.requireManagedFolder(mcDataDir, folder, "folder");
         if (Files.isDirectory(dir) && !ManagedWorld.hasMarker(dir)) {

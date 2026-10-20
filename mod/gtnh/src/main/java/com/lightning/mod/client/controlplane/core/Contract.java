@@ -11,10 +11,63 @@ public final class Contract {
 
     /**
      * 契约版本（{@code GET /cp/v1/about} 的 {@code contractVersion} 字段）。
-     * 1.0=PR-1 动作面；1.1=PR-2 取证动作；1.2=PR-3 双轨判据（te-state-equals/image-uniform）。
+     * 1.0=PR-1 动作面；1.1=PR-2 取证动作；1.2=PR-3 双轨判据（te-state-equals/image-uniform）；
+     * 1.3=观察面读面 + L0 布景原语（issue #98：{@code read.*} 八动作；issue #99：{@code scene.*} 六动作，
+     * 见 contract.md §4.1/§4.4）；
+     * 1.4=收口T3 命令通道（issue #100：{@code cmd.exec} / {@code export.session}，见 contract.md §4.5）；
+     * 1.5=L1 玩家操作（issue #101：{@code player.*} 九动作，见 contract.md §4.6；调度者撞号裁决：
+     * 本单分支自报 1.4 与 #100 撞号，合流时统一为 1.5）；
+     * 1.6=无人值守收尾原语（issue #103：{@code core.shutdown}，见 contract.md §4.9）；
+     * 1.7=收口批次（调度者裁决）：
+     * <ul>
+     * <li>导出与产物纪律（issue #102：{@code export.scene} / {@code export.registry} /
+     * {@code export.multiblock} 三动作，见 contract.md §4.7）；</li>
+     * <li>托管世界标记前置与 {@code complete} 状态机（issue #123：{@code world.rebuild} 的标记前置 +
+     * {@code world.info} 新增 {@code markerComplete} 响应字段 + {@code world.snapshot} 只接受构建完成的
+     * 世界，见 contract.md §6.1/§6.6）；</li>
+     * <li>L0 流体注入（issue #122：{@code scene.tank.fill}，见 contract.md §4.4；同一批的
+     * {@code scene.inventory.write} 追加 {@code material}+{@code prefix} 条目形态——只增可选字段、
+     * 不改既有语义，故该动作 {@code since} 仍为 1.3）；</li>
+     * <li>捕获通道自证诊断迁移（issue #114：{@code read.capture} 读面（§4.1）+ {@code capture.diag}
+     * 布防/drain-dump（§4.11）；#104 删除老探针 {@code CaptureChannelProbeAutomation} 的前置——V4 职责真空）。</li>
+     * </ul>
+     * 1.8=通用玩家输入设施（issue #160 立项 / #162 冻结 / #163/#164 实现 / #165 注册收口）：
+     * <ul>
+     * <li>输入手段族五个动作注册（{@code input.key} / {@code input.text} / {@code input.mouse} /
+     * {@code input.release} 四个 {@code scene} 级可写动作 + {@code input.state} 只读观察面），
+     * 见 contract.md §4.12 与 {@code input-contract.md}；</li>
+     * <li>{@code ActionDescriptor} 新增<b>可选</b>自描述字段 {@code means}（手段归因）。<b>不设默认值</b>：
+     * 只在承担归因义务的动作上写（本批为输入族写 {@code "input"}），缺省时该键<b>不出现</b>，
+     * 因此是 43 个既有动作自描述 JSON 的逐字节不变增量——见 {@code input-contract.md} §9.4；</li>
+     * <li>输入族返回值以 {@code means:"input"} 归因、{@code layer} 恒 {@code null}（§4.6 的
+     * {@code layer}/{@code semantics} 成对规则的<b>显式例外</b>，理由见 {@code input-contract.md} §10.3）。</li>
+     * </ul>
      * 小版本只增不改义（contract.md §5）。
+     *
+     * <p>
+     * <b>撞号提示（如实留痕）</b>：#102/#114/#122/#123 四单并行，各自开号必然撞号（#122 自报 1.6，
+     * 与 #103 的 1.6 冲突）。四单同为「只增」，撞号不产生语义冲突，但 {@code contractVersion}
+     * 只能有一个值——由调度者统一裁决为 <b>1.7</b>（并禁止出现 {@code 1.10} 这类值：
+     * 版本按字符串/浮点比较，{@code 1.10} 会排到 {@code 1.6} 之前）。
+     *
+     * <p>
+     * <b>1.7 为什么算增量而不是破坏</b>：新增的是响应字段与一个新的世界状态（构建中的
+     * {@code complete:false}）。既有世界（旧代码建的标记无 {@code complete} 键 ⇒ 按完成读）行为逐字不变，
+     * {@code world.snapshot} 的接受集合因此没有缩小；被新拒的只有「本次构建尚未收口的世界」——
+     * 那个状态在 1.7 之前根本不存在（那时它是「无标记」，本来就被拒）。
+     *
+     * <p>
+     * <b>不变式</b>：本值必须 ≥ 任一动作自描述的 {@code since}——否则自述端点会给出
+     * 「服务契约版本比某个动作的引入版本还旧」这种自相矛盾的目录（D1/D3 会判红）。
+     * 新增动作时两处要一起改。
+     *
+     * <p>
+     * <b>1.8 为什么算增量而不是破坏</b>：五个新动作是纯新增；{@code means} 是<b>可选</b>字段
+     * （缺省不出现，既有动作 JSON 逐字节不变）；输入族返回值是新增形态，不改任何既有动作的语义。
+     * 唯一被改动的既有契约文字是「动作计数 43→48」与「版本 1.7→1.8」，两者都是计数/版本前进，
+     * 不是语义变更。
      */
-    public static final String VERSION = "1.2";
+    public static final String VERSION = "1.8";
 
     /** 契约 URI 前缀，即契约大版本。 */
     public static final String PREFIX = "/cp/v1";

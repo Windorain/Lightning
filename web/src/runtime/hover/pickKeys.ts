@@ -1,7 +1,8 @@
 import type { BlockRef } from '@/context/selection'
-import type { ScenePickResult } from '@/render/interaction/scenePick'
+// R1-β① C8：形状契约迁出旧实现文件（见 `presentation/pickResult` 的说明）。
+import type { PickResult } from '@/presentation/pickResult'
 
-export function pickTargetKey(picked: ScenePickResult): string {
+export function pickTargetKey(picked: PickResult): string {
   if (!picked) return ''
   if (picked.kind === 'block') {
     return `b:${picked.blockId}:${picked.column},${picked.row},${picked.zSlice}`

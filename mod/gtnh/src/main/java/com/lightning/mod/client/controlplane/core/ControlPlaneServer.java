@@ -184,6 +184,17 @@ public final class ControlPlaneServer {
     private long startedAtMillis;
     private JsonObject serverJson;
 
+    /**
+     * 进程正常退出时的 <b>best-effort 清理</b>（契约 §3.4 路径 5；由上层装配，本层不认识输入设施）。
+     *
+     * <p>
+     * 【#166 DR-3】此前 {@link #installShutdownHook()} 的钩子**只调 {@code stop()}**，而机读面
+     * （{@code input.state.lifecycle.cleanupPaths}）与契约 §3.4 都宣称「进程正常退出 ⇒ 尽力投递抬起」
+     * ⇒ 自述说了一条没有代码的路径。现在钩子在**同一条**既有线程上先跑这里注册的清理，再停服务；
+     * 它不新增订阅者、不抢线程，也不碰 GL（清理体只写 Java 事件队列）。
+     */
+    private volatile Runnable shutdownCleanup;
+
     /** 构造。 */
     public ControlPlaneServer(Config config) {
         this(config, TimeSource.system());
@@ -277,6 +288,40 @@ public final class ControlPlaneServer {
         emit(EventStream.Kinds.SERVER_STOP, "控制面已停止");
     }
 
+    /**
+     * 注册进程退出时的 best-effort 清理（在 {@link #installShutdownHook()} **之前**调用）。
+     *
+     * <p>
+     * 由上层（{@code mc/ControlPlaneBootstrap}）注入输入设施的尽力释放：{@code core} 层不依赖
+     * {@code mc} 层（全树 {@code core/*.java} 对 {@code mc.*} 零 import），因此这里只留一个
+     * 与 {@code CoreEndpoints.AboutContributor} 同款的回调口。
+     *
+     * @param cleanup 清理体；允许抛（钩子整段吞掉并只 WARN 一次）；{@code null} = 无清理
+     */
+    public void setShutdownCleanup(Runnable cleanup) {
+        this.shutdownCleanup = cleanup;
+    }
+
+    /**
+     * 执行 shutdown hook 的**清理段**（钩子线程上跑；与 {@link #installShutdownHook()} 同一条线程）。
+     *
+     * <p>
+     * <b>整段 try/catch，吞掉一切异常并只 WARN 一次</b>：退出路径上任何异常都不许阻止 {@code stop()}
+     * 与 JVM 退出（best-effort 的语义就是「尽力，失败只留痕」）。异常只记类型与消息，不打印栈——
+     * 退出时的栈没有诊断价值，反而可能拖慢退出。
+     */
+    public void runShutdownCleanup() {
+        Runnable cleanup = shutdownCleanup;
+        if (cleanup == null) {
+            return;
+        }
+        try {
+            cleanup.run();
+        } catch (Throwable t) {
+            warn("进程退出时的 best-effort 清理失败（已忽略，退出不受影响）: " + t);
+        }
+    }
+
     /** 注册 JVM 关闭钩子（contract.md §9：无 FML 客户端停止事件可用）。 */
     public void installShutdownHook() {
         Runtime.getRuntime()
@@ -284,6 +329,8 @@ public final class ControlPlaneServer {
 
                 @Override
                 public void run() {
+                    // best-effort 输入清理在前（§3.4 路径 5）：抬起事件越早写进队列越可能被消化
+                    runShutdownCleanup();
                     stop();
                 }
             }, "lightning-controlplane-shutdown"));

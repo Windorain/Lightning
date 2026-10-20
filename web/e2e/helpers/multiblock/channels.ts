@@ -183,7 +183,7 @@ export async function readChannelPanel(page: Page): Promise<ChannelPanelObservat
 /**
  * 切到「通道」tab 并等到面板的**装配观测**就绪（`data-mb-dims` 非空）。
  *
- * 为什么需要这一等：`data-mb-dims` 来自装配结论（`buildChannelPanelModel`），
+ * 为什么需要这一等：`data-mb-dims` 来自装配结论（`multiblockChannelUi#channelPanelModelOf`），
  * 而面板的出现只要求 `decl !== null`。文档刚注入时装配可能还没跑完，
  * 此时 `data-mb-dims` 为空串——若在那一刻断言尺寸，会得到假红。
  */
@@ -430,7 +430,11 @@ async function readComboSnapshot(
         panelRunstate: panel?.getAttribute('data-mb-runstate') ?? null,
         panelDisplayName: panel?.getAttribute('data-mb-display-name') ?? null,
         panelChannelValues: channelValues,
-        meshUuid: group && typeof group.uuid === 'string' ? group.uuid : null,
+        // R1-β① C8：世代身份改吃**呈现会话的批次世代**（画面生产者已是它）；
+        // 旧口径 `group.uuid` 在"contentGroup 就是稳定的呈现根"后不再随重建推进。
+        meshUuid: typeof slot?.presenterSurface?.generation === 'string'
+          ? `presenter:${slot.presenterSurface.generation}`
+          : (group && typeof group.uuid === 'string' ? group.uuid : null),
         meshMeshes: meshes,
         meshVertices: Math.round(vertices),
         meshTriangles: Math.round(triangles),

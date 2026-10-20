@@ -10,15 +10,38 @@
   "schema": "lightning.case/1",          // 必填，精确匹配
   "id": "lp-pipe-row",                    // 必填，[a-z0-9-]+，run 目录名组成部分
   "label": "LP 四格管道参照",              // 展示名
+  // 以下键按「执行序」排列（段序见本节末）：JSON 对象键无序，但文档按执行序写以免读者误读
   "world":    { ... },                   // 必填：世界构建方式
-  "build":    [ ... ],                   // 可空：场景构建步骤
   "capture":  { ... },                   // 可空（PR-2 起）：扫描与捕获参数
+  "build":    [ ... ],                   // 可空：场景构建步骤
+  "read":     [ ... ],                   // 可空（v1.3，issue #98）：读面步骤
+  "action":   [ ... ],                   // 可空（v1.6，issue #103）：L2 编排步骤（任意 cp 动作；v1.8 起含输入族跨 tick 步）
+  "export":   [ ... ],                   // 可空（v1.7，issue #102）：导出步骤
   "cameras":  [ ... ],                   // 可空（PR-2 起）：机位表
   "criteria": [ ... ],                   // 必填，至少一条：判据与阈值
   "variants": [ ... ],                   // 可空：负对照变体
   "evidence": { ... }                    // 必填：期望证据清单
 }
 ```
+
+**段序即执行序**（v1.7，含 `export` 段后为九段）：
+
+> **段序的唯一权威 = 源码 `controlplane/core/CaseValidator.java` 的 `SEGMENTS`**（`CaseValidator.java:69-83`，
+> 按 `world`/`capture`/`build`/`read`/`action`/`export`/`cameras`/`criteria`/`evidence` 顺序逐条添加）。
+> **本节是文档里唯一的段序字面副本**；本文件其他小节与 `contract.md` 只引本节，不复述段序——
+> 复述过一次就漂移过一次（2026-10 收口核对实测：文档里曾有 6 种写法只有 2 种对，其中一种还臆造了段名 `shots`，
+> 照它写 `segments:["shots"]` 会当场得 `CP-VALID-002`，见 Gitea #105 / #136）。
+> 段序漂移的机械守卫见 `mod/gtnh/src/test/java/com/lightning/mod/client/controlplane/core/CaseSegmentOrderDocTest.java`
+> （断言 `SEGMENTS` 与全仓 `docs/` 的段序串一致）。
+
+```
+world → capture → build → read → action → export → cameras → criteria → evidence
+```
+
+`action` 排在 `read` 之后、`export` 之前：读面读的是**成品场景**（编排要改世界就该发生在读数之后，
+否则读数说的是改动前的世界而调用方以为它说的是当前的）；`export` 排在 `cameras` 之前——截图段会覆写投影/光照/渲染状态，
+导出件该反映的是「本 run 构建出的那个世界」，而不是「拍摄过程干预后的世界」；截图与判据必须说**同一个世界**
+（编排若排在拍摄之后，截图里的世界与 `criteria` 段读到的世界就不是一回事了）。
 
 ## 2. world 段
 
@@ -40,10 +63,215 @@
 |---|---|---|
 | `clear` | `from:[x,y,z], to:[x,y,z]` | 托管区域清场（setBlockToAir） |
 | `block` | `at:[x,y,z], id:"minecraft:stone", meta:0` | 放置方块 |
-| `te` | `at:[x,y,z], completer:"vanilla"\|"lp-pipe"\|"ae2-part", params:{...}` | TE 状态补全（权威同步路径，contract.md §6.4）；`completer` 必须在注册表中 |
+| `te` | `at:[x,y,z], completer:"vanilla"\|"lp-pipe"\|"ae2-part"\|"gt-machine", params:{...}` | TE 状态补全（权威同步路径，contract.md §6.4）；`completer` 必须在注册表中。`gt-machine`（#117）的 `params` 是放置输入：`{machine:"Machine_LV_ChemicalReactor"}`（GT `ItemList` 常量名，首选）或 `{item:"gregtech:gt.blockmachines", meta:421}`（显式 MetaTileEntity id，须 > 0），可选 `side`（DOWN\|UP\|NORTH\|SOUTH\|WEST\|EAST，默认 UP）。补全器自带放置与放置后读回验证（读回 `mID == 0` 的空壳即 `CP-EXEC-001`），故用例**不要**先用 `block` 步铺 GT 机器方块；给机器供电用 §3 之外的 `scene.inventory.write`（`battery` + `charge:"full"` 写进机器充电槽）；**给机器注流体用 `scene.tank.fill`**（#122，contract.md §4.4；`scene.inventory.write` 只碰 `IInventory`，碰不到 `IFluidHandler`）——读回走 `read.te` 的 `tanks` 字段 |
 | `wait` | `ticks:N` | 等待 N tick（同步/渲染稳定） |
 
 坐标三种写法，一律规范化为绝对坐标：绝对数组 `[x,y,z]`；`"@base"` + 同层 `offset:[dx,dy,dz]`；字符串 `"base+[dx,dy,dz]"`。`world.base` 只接受绝对数组。构建完成后运行器自动做：TE 补全（`te` 步声明的）→ `markBlockRangeForRenderUpdate` → 静置 `settleTicks`。
+
+## 3.1 read 段（读面步骤，v1.3 / issue #98）
+
+每步一个对象：`{action:"read.blocks", params:{...}, path:"read/blocks.json", role?}`。
+执行该读面动作（契约 §4.1 的 `read.*`），把返回的 JSON 落 run 目录的 `path` 并登记为产物。
+段序在 `build` 之后、`cameras` 之前——读的是**成品场景**，且产物必须先落盘，`criteria` 段才引用得到。
+
+```jsonc
+"read": [
+  { "action": "read.blocks",
+    "params": { "from": [64,11,63], "to": [69,15,68], "includeAir": true },
+    "path": "read/blocks.json", "role": "read-blocks" },
+  { "action": "read.diff",
+    "params": { "expectManifestFile": "cp_demo" },
+    "path": "read/diff.json" }
+]
+```
+
+**校验口径（`case.validate` 与 `case.run` 同源）**：
+1. `action` 必填且**必须**以 `read.` 开头——读面段只放读动作（写动作走 `build` 段）；这是「读面只读」
+   这条纪律唯一的**静态可查落点**。动作是否真的已注册由 `case.run` 的 `read` 段执行期判定
+   （`CP-VALID-001`，`context.registered` 给出全部已注册动作名）。
+2. `path` 必填、必须是合法的 run 目录内相对路径（防穿越）；同一次用例内**不得重复**
+   （后一步会静默覆盖前一步，判据引用哪一份就说不清了），也不得与运行器自身产物
+   （`manifest.json`/`criteria.json`/`evidence.json`/`observation.json`）重名。
+3. 空 `read` 段给 warning（声明了但没写步骤，多半是笔误），不是错误。
+4. 读面步骤**必须是同步动作**（`read.*` 全部是）：跨 tick 的读面会读到两个世界状态。
+5. 产物落点即判据的 `params.path`；`role` 缺省时按动作名派生（`read.blocks` → `read-blocks`）。
+6. 读面步骤与 `criteria` **同一份 run 目录**（`ActionContext.withParams` 共享 run）——
+   这是「读面输出可被判据直接引用」的机械保证。
+7. 变体补丁可以改 `read` 段的 `params`（负对照「读数变了判据该红」的基础），写法同其它段（RFC 6902 子集）。
+
+## 3.2 action 段（L2 编排步骤，v1.6 / issue #103）
+
+**这一段是「L2 = L0/L1 的有序编排」在代码上的落点。** 每步一个对象：
+
+```jsonc
+"action": [
+  { "action": "scene.player.pose",
+    "params": { "pos": [64.5, 13.0, 64.5], "yaw": 180, "allowFlying": true },
+    "path": "action/0-pose.json", "role": "scene-player-pose",
+    "expect": { "/after/isFlying": true, "/observed": true } },
+  { "action": "scene.inventory.write",
+    "params": { "target": "player", "slots": [{ "slot": 0, "id": "minecraft:stone", "count": 64 }] },
+    "path": "action/1-give.json" },
+  { "action": "player.place_block",
+    "params": { "at": [64, 12, 64], "side": 1 },
+    "path": "action/2-place.json",
+    "expect": { "/blockAppeared": true, "/observed": true } }
+]
+```
+
+**语义**：执行该动作（契约 §4 的**任意已注册同步动作**，外加下面这个唯一的跨 tick 例外）→ 结果 JSON 落 run 目录的 `path` 并登记为产物
+→ `expect` 非空时**当场**逐步断言。
+
+### 跨帧的输入固定程序（v1.8 / G1，issue #165）
+
+**本段的默认语义是「在单次 `advance` 内逐条跑完」**（所以放行要装卸世界的步进动作会让「段完成」
+与「动作完成」脱钩）。输入族是唯一的例外——不推进它，「注入输入 → 推进 N tick → 读后果」
+在用例里**无法表达**：
+
+```jsonc
+"action": [
+  { "action": "input.key",
+    "params": { "key": "key.forward", "action": "tap" },
+    "holdTicks": 20,                        // 顶层：与 params 并列（D-3），不是动作参数
+    "path": "action/0-hold-w.json", "role": "input-hold-forward",
+    "expect": { "/delivered": 2 } },
+  { "action": "input.key",     "params": { "key": "key.forward", "action": "down" }, "path": "action/1-down.json" },
+  { "action": "input.state",   "params": { }, "path": "action/2-held.json",
+    "expect": { "/held/count": 1 } },       // 释放前的读断言：看得到「未释放」态
+  { "action": "input.release", "params": { }, "path": "action/3-release.json" },
+  { "action": "input.state",   "params": { }, "path": "action/4-released.json",
+    "expect": { "/held/count": 0 } }        // 释放之后的读断言
+]
+```
+
+**规则（逐条可判定）**：
+
+1. **例外只对一个集合开**：`CaseValidator.ACTION_STEPPING_INPUT_ACTIONS` = `input.key` / `input.mouse`。
+   其它步进动作仍拒（`CP-VALID-002`）——段语义是「一次 advance 里跑完」，放行要装卸世界的那类动作
+   会让「段完成」与「动作完成」脱钩。
+2. **一次 tick 只推进一次**：在飞的输入步每次 `advance` 恰好被推进一步。未完成即让出本 tick
+   （不 sleep、不忙等、不在段内循环到完成）；**完成也到此为止**——每个输入步至少占一个 tick，
+   于是「按下」与紧随其后的读断言天然隔着帧边界，不会挤进同一次 `advance`。
+   与之相对，**相邻的同步步骤仍在同一 tick 内连跑**（这是本段 G1 之前就有的语义）：若某处需要
+   额外的帧边界，就在那里插入一个输入步（它至少占一 tick）。
+3. **完成前不进入下一步骤**：后续步骤（含读断言）不抢跑。
+4. **`holdTicks` 写在步骤对象顶层**（与 `params` 并列，D-3）：精确整数 `1..1200`。
+   `1` = 同一次调用内 down+up；`≥2` = 第 `holdTicks` 个 tick 抬起。**不写**即
+   「显式定义的单次推进」——动作自己的缺省（`1`）说了算，执行器**不补**任何隐式持有量。
+5. **输入族步进步的 `params` 内不得出现 `holdTicks`**：只写在 `params` 内、或两处都写，都是
+   `CP-VALID-002`（真值来源不明）。顶层→动作参数的翻译由执行器做，那是**唯一**的翻译点。
+   这条只约束输入族步进步：`params` 是**动作自己的**参数空间，别的动作可能有同名参数
+   （如 `player.dig` 的 `params.holdTicks`），校验器不越过动作边界去否决它们。
+6. **不适用字段显式拒绝，绝不静默忽略**：同步动作写 `holdTicks`；`input.key` 的 `action` 不是
+   `tap`；`input.mouse` 的 `op` 不是 `click`——三种都在 `case.validate` 期即报 `CP-VALID-002`
+   并给出字段上下文（`action[i].holdTicks` / `action[i].params.holdTicks`）。
+7. **输入步不走步骤间收敛**（§10.7 的 `settleBetweenSteps`）：它的「等」是 tick 推进，不是墙钟等待。
+8. **收尾必须释放所持按下态**：段内失败、阶段超时、段异常三条路径都会释放（失败现场释放一次，
+   `case.run` 的 `onFinish` 兜底再调一次，幂等）。释放走 `input.release` 的**同一实现**（无隐藏通道）；
+   该动作未注册时记一条 warn 事件，并由设施对每个持有点的 1200 tick 到期自动抬起兜底（D-4）。
+   `down` 刻意保留持有，因此**没有**显式 `input.release` 的固定程序不会留下永久按下的键。
+9. **段产物形态不变**：`segments/action.json` 的字段集合与每条步骤记录的字段集合都**不**因这一点增量
+   而改变（`settleMs`/`assertions` 本就是可缺省的）；输入步的 tick 推进明细落在**该步自己的**
+   `action/N-*.json`（即该动作的返回值）。**没有输入步的用例走的是同一条代码路径与同一组语句**，
+   记录字段集合逐个不变（契约 §9.2 回归面第 7 条的口径），A3 基准不失效。
+
+### 老用例兼容口径（v1.8 增量的影响面，逐条可判定）
+
+| 旧用例的形态 | v1.8 之后的行为 | 需要改吗 |
+|---|---|---|
+| 不含 `holdTicks`、不含 `input.*` 步 | **同一条代码路径、同一组语句**；段产物与步骤记录字段集合逐项不变（上条规则 9） | 不需要 |
+| 含 `input.*` 步（**先前必然失败**：动作未注册 ⇒ `CP-VALID-001`） | 现在已注册可用 ⇒ 这是**放宽**，不是回归 | 不需要。**但**：若旧用例/旧判据把「`input.*` 必然报未知动作」当作**负对照**，那一处现在**会红**——那是**判据失效**，必须换成别的负对照（`CP-CONFIRM-001`、`CP-STATE-001` 等），不得改判据口径去迁就 |
+| 用变体 `patch` 改 `action` 段的 `params` | 不变：`holdTicks` 在**步骤顶层**、不在 `params`，变体的改法不受影响 | 不需要 |
+| 依赖「`action` 段只许同步动作」这条**执行期**规则 | 例外只对 `input.key`/`input.mouse` 开（规则 1），其它步进动作仍 `CP-VALID-002` | 不需要 |
+| 任何旧用例 | 用例文件**只固定 schema**（`lightning.case/1`，`CaseParser.java:176-180`），**不固定契约小版本**（`contractVersion` 是 `/cp/v1/about` 的报项）⇒ 契约 1.7→1.8 **不**使旧用例失效 | 不需要 |
+
+### 与 read 段的对称与差异
+
+| 项 | `read` 段（v1.3） | `action` 段（v1.6） |
+|---|---|---|
+| 步骤形态 | `{action, params, path, role?}` | `{action, params, path, role?, expect?, holdTicks?}` |
+| 动作名前缀 | **只许 `read.*`**（读面只读的静态落点） | **不限**（本职就是调 L0/L1 写动作） |
+| 静态纪律 | 前缀 + 路径纪律 | ①禁编排收尾原语（见下）②路径纪律③`holdTicks` 的位置与取值域 |
+| 同步性 | 静态声明为只许同步 | **执行期**判定（core 没有注册表）：同步动作 + 输入族步进动作（`input.key`/`input.mouse`），后者按「跨帧的输入固定程序」推进 |
+| 产物落点 | 同一 run 目录（`ActionContext.withParams` 共享 run） | 同左 |
+
+### 校验口径（`case.validate` 与 `case.run` 同源）
+
+1. `action` 必填；**不得是收尾原语**——`core.shutdown` 被 `CaseValidator.ACTION_FORBIDDEN` 明确拒绝：
+   它会让本作业后续段（含 `criteria`/`evidence`）不再执行，收尾必须由驱动在**整跑结束后**单独发起。
+2. `path` 必填、必须是合法的 run 目录内相对路径（防穿越）；同一次用例内**不得重复**，
+   也不得与运行器自身产物（`manifest.json`/`criteria.json`/`evidence.json`/`observation.json`）重名。
+3. `expect`（可选）形态是 **`{RFC 6901 指针: 期望值}`**，一个对象里可放多条，全部必须命中：
+   - **空对象是错误**（空断言集恒绿——恒绿假断言是明确要防的失效模式）；要不断言就别写这个字段；
+   - 指针必须 `/` 开头（`""` = 整棵结果对象，与 `json-field` 同口径）；单步上限 64 条；
+   - 求值走 `Json.resolvePointer`——**与 `json-field`/`te-state-equals` 判据同一份实现**，不另起一套指针语义。
+4. 动作是否真的已注册、是同步还是步进，由 `case.run` 的 `action` 段**执行期**判定
+   （`CP-VALID-001`，`context.registered` 给出全部已注册动作名）。同步动作逐条跑完；
+   **非输入族**的步进动作一律拒（`CP-VALID-002`）——放行跨 tick 的它们会让「段完成」与
+   「动作完成」脱钩；输入族步进动作（`input.key` / `input.mouse`）按「跨帧的输入固定程序」推进。
+5. 产物落点即判据的 `params.path`；`role` 缺省时按动作名派生（`player.place_block` → `action-player-place_block`）。
+6. 变体补丁可以改 `action` 段的 `params`（负对照「编排参数变了判据该红」的基础），写法同其它段。
+
+### 「逐步断言」的判定口径（#103 裁决 T3-3）
+
+逐步断言不是「跑完再一起判」，而是**每步跑完当场判**：
+
+- `expect` 命中 ⇒ 该步记 `ok:true` + `assertions[{pointer, expect, actual, ok}]`，继续下一步；
+- 任一条不命中 ⇒ **当场 `CP-EXEC-001`**（`context.assertions` 逐条给出两侧值、`context.failed` 只列不命中项），
+  本段中止，run 目录里留下的产物**正好停在失败那一步**——而不是一份「跑完了但判据红」的现场。
+
+这条与 `criteria` 段的分工是：`criteria` 判**结论**（跑完之后，对全部产物求值），
+`expect` 判**过程**（每一步的即时后果）。两者不互替：只有 `expect` 能在「第 3 步就已经错了」时
+让第 4 步不要在一个错的基础上继续跑。
+
+**前提：步骤间收敛**（`settleMs`）。逐步断言要求「第 N 步的结果」= 「第 N 步做完之后的世界」，
+而 L1 的请求是包、服务端在它自己线程的 tick 里处理——不收敛就会让逐步断言**系统性假红**
+（实机形态与修法详见 §10.7）。每一步之后的等待时长落该步的 `settleMs`。
+
+### 分层标注（#96 §4.2）
+
+编排段可以把 L0（`scene.*`）与 L1（`player.*`）混编，但**两层的结论不互替**：
+L0 的产物不能当 L1 的证据。用例作者应在 `label` 或资产索引行里写明「本程序在哪一层取得结论」，
+判据的 id 也应带上层前缀（`l0-*`/`l1-*`）以便机械区分。
+
+## 3.3 export 段（导出步骤，v1.7 / issue #102）
+
+每步一个对象：`{action:"export.scene", params:{...}}`。执行该导出动作（契约 §4.7 的 `export.*`），
+产物落**本用例的 run 目录**并登记哈希——**落点由导出动作决定，段里不声明**。
+
+```jsonc
+"export": [
+  { "action": "export.scene",
+    "params": { "name": "lp-pipe-row", "shape": "world", "frames": "all" } }
+]
+```
+
+**为什么需要独立一段（C4「同 run 纪律」）**：C4 要求「导出件、实拍、观测记录、世界清单哈希**同一 run**，
+且该 run 内世界清单哈希唯一」。若导出只能在用例之外单独调 `export.scene`，它必然落在**另一个** run 里
+——那么「同一 run 内世界清单哈希唯一」这条判据对导出件就永远不成立。
+
+**段位**：`export` 排在 `action` 之后、`cameras` 之前（九段执行序见 §1，权威 `CaseValidator.SEGMENTS`）。
+顺序的理由不是风格：`cameras` 段会覆写投影/光照/渲染状态，导出件该反映的是「本 run 构建出的那个世界」，
+而不是「拍摄过程干预后的世界」。
+
+**校验口径（`case.validate` 与 `case.run` 同源）**：
+
+1. `action` 必填且**必须**以 `export.` 开头——导出段只放导出动作（与 `read` 段限 `read.*` 同一思路：
+   段语义靠前缀静态可查）。动作是否真的已注册由 `case.run` 的执行期判定（`CP-VALID-001`）。
+2. 段里**不**接受 `path`/`role`（未知字段即 `CP-VALID-002`）：落点由导出动作决定，
+   段里再声明一个会产生**第二处真相**（已实测过的形态：声明一个落点而动作写到别处）。
+3. 空 `export` 段给 warning（不是错误）——不是每个用例都要产导出件；但该 warning 会点明
+   C4 的后果，避免缺口无声。
+4. 导出动作**可以是步进动作**（与 `read` 段相反）：`export.scene` 跨阶段推进，且它在 `onBegin`
+   **一次性取走**帧缓冲快照，因此跨 tick 不引入撕裂。`case.run` 的 `export` 段在段内循环推进到完成
+   （上限 `MAX_EXPORT_STEPS`），产物因此落**用例自己的 run 目录**（不是子作业的 run）。
+5. 产物落点与 role 见 contract.md §4.7.1；判据用 `artifact-exists` / `artifact-nonempty` /
+   `json-field` 指向 `/cp/v1/artifacts/{runId}/{path}` 里的那份文件。
+6. 变体补丁可以改 `export` 段的 `params`（负对照「导出形态/帧集变了判据该红」的基础）。
+
+> **`frames` 与 `expectFrames`**：`frames:"all"` 导出缓冲内全部帧；`expectFrames:{frames:[0,1,2]}`
+> 是 C3「同会话同缓冲」的调用方侧判据——不符即 `CP-STATE-001`（带 `extra`/`missing`），
+> 拦的正是跨会话拼接。完整口径见 [format-scene-file.md](../contracts/format-scene-file.md) §6。
 
 ## 4. capture / cameras 段（PR-2 起生效）
 
@@ -53,7 +281,7 @@
   "renderMode": "本色",                   // 本色 | 参与光照（豁免一，会话默认）
   "worldTime": 6000                      // 可空：拍摄光照基准
 },
-"cameras": [ CameraSpec, ... ]           // 可空：机位表（CameraSpec 见 contract.md §4.1），逐个调 shot.multi 同一实现
+"cameras": [ CameraSpec, ... ]           // 可空：机位表（CameraSpec 见 contract.md §4.3），逐个调 shot.multi 同一实现
 ```
 
 - 两段都空 → 不产截图；`cameras` 非空时才需要 forensic 级 token（`case.run` 权限按内容升格：含 cameras 段的用例必须 forensic 调用）。
@@ -68,17 +296,71 @@
 |---|---|---|
 | `artifact-exists` | `path` | run 目录内产物存在 |
 | `artifact-nonempty` | `path, minBytes(默认1)` | 产物存在且字节数 ≥ minBytes（**非空断言**，V2） |
-| `json-field` | `path, pointer:"/a/b/0", expect` | JSON 产物字段等于 expect（RFC 6901 指针） |
-| `world-hash-equals` | — | 重建后场景哈希等于本 run 首次构建哈希（幂等判据） |
-| `event-emitted` | `kind, minCount` | 事件流水含指定 kind 至少 minCount 条 |
+| `json-field` | `path, pointer(RFC 6901), expect(必填)` | JSON 产物字段等于 expect（RFC 6901 指针） |
+| `world-hash-equals` | `—` | 重建后场景哈希等于本 run 首次构建哈希（幂等判据） |
+| `event-emitted` | `kind, minCount(默认1)` | 事件流水含指定 kind 至少 minCount 条 |
 | `image-size-equals`（PR-2） | `path, width, height` | 图像产物尺寸等于期望（读取 PNG 头，不解码全图） |
 | `image-not-uniform`（PR-2） | `path, maxSameColorRatio(默认0.98)` | 图像非纯色——主色占比 < maxSameColorRatio（防黑屏/全白假图，负对照友好） |
-| `te-state-equals`（PR-3，运行期轨） | `at:[x,y,z], key, expect` | 经补全器同族的 **TE 描述器**（TeDescriber，与 completer 同注册、只读不写）读取 TE 运行期状态字段（LP：renderState 连接矩阵/管型；AE2：各面部件清单），与 expect 比较；描述器输出同时进观测记录 runtimeReads（te.* 条目） |
+| `te-state-equals`（PR-3，运行期轨） | `at[x,y,z], key(RFC 6901 指针，对描述器输出), expect(必填)` | 经补全器同族的 **TE 描述器**（TeDescriber，与 completer 同注册、只读不写）读取 TE 运行期状态字段（LP：renderState 连接矩阵/管型；AE2：各面部件清单），与 expect 比较；描述器输出同时进观测记录 runtimeReads（te.* 条目） |
 | `image-uniform`（PR-3，图像轨补充） | `path, minSameColorRatio(默认0.98)` | 图像近纯色——主色占比 ≥ minSameColorRatio（TE 距离门远机位：被门剔除的场景应近似纯背景） |
+
+> **本表的 `params` 列逐字等于自描述端点的 `params`**（§5.1 的三方对账口径）。
+> 历史上这三行与端点不一致（`json-field` / `event-emitted` / `te-state-equals` 的默认值与指针形态写法不同），
+> 由 `test/criteria/check-criteria-types.mjs` 在 #103 当场照出——**以端点为权威，本表向它对齐**。
+
+**读面输出的判据引用（v1.3，issue #98）**：`read.*` 动作是 `observe` 级**普通动作**，不经用例文件——
+它们由调用方在跑用例前后直接调，产物落 run 目录（`read.diff` 的 `expectManifestFile` 路径），
+再用既有的 `json-field` 判据断言。**没有**为读面新增判据类型：读面要服务的是「读得全、读得准」，
+而不是再造一套断言词汇；「读数进判据」这条链路由 `json-field` 的 RFC 6901 指针直接承担，
+一处定义、一处求值。典型形态：
+
+```jsonc
+// criteria 段：引用 read.te 的族状态（与 te-state-equals 同一棵树，同一读取口）
+{ "id": "read-te-pipe-up", "type": "json-field",
+  "params": { "path": "read/te.json", "pointer": "/tiles/0/claimedState/connections/UP" },
+  "expect": true }
+// criteria 段：引用 read.blocks 的规范化哈希（与 read.diff 的 hashes 同口径）
+{ "id": "read-blocks-hash", "type": "json-field",
+  "params": { "path": "read/blocks.json", "pointer": "/sha256" },
+  "expect": "<64 位十六进制>" }
+// criteria 段：引用 read.diff 的差异计数（0 = 与期望态逐格一致）
+{ "id": "read-diff-clean", "type": "json-field",
+  "params": { "path": "read/diff.json", "pointer": "/different" }, "expect": 0 }
+```
+
+读面产物落 run 目录的路径约定（`read.diff` 的 `expectManifestFile` 路径）：`read/diff.json`，
+role `read-diff`，登记进 `manifest.json`（§7 的 `evidence.expect` 可直接引用它）。
 
 **双轨判据口径（#41，PR-3 起对锚点用例强制）**：同一可视特性必须成对断言——运行期轨（`te-state-equals`）证「世界状态对」，图像轨（`image-not-uniform`/`image-uniform`/`image-size-equals`）证「渲染结果对」。锚点用例（LP 四管/AE2 部件）的每个 TE 可视特性两轨齐备；双轨不齐的锚点用例视为用例缺陷（验收驱动静态检查）。
 
 判据结论：`{id, verdict: "green"|"red"|"error", detail}`。`error`（判据自身无法求值，如产物缺失到连断言都不能做）视同 red 但单列。
+
+### 5.1 `criteriaTypes`：判据类型的自描述（v1.3 起，本表是它的对齐对象）
+
+`case.validate` 的结果里有 `criteriaTypes`，形态 `[{type, since, params}]`——**它是判据类型注册表的
+唯一权威**，上面那张表与 `CriteriaEngine.TYPES` 都必须向它对齐（#103 G7 的三方对账）：
+
+| 方 | 位置 | 角色 |
+|---|---|---|
+| ① 自描述端点 | `case.validate` 的 `criteriaTypes`（数据源 `CriteriaEngine.typeCatalog()`） | **唯一权威**：调用方据此知道能写哪些判据、各自参数形态与引入版本 |
+| ② 注册表 | `CriteriaEngine.TYPES`（`CaseParser.parseCriteria` 用它判「未知判据类型」） | 必须与 ① **同序、同集合、逐条 `type`/`since`/`params` 一致** |
+| ③ 本文件 §5 的表 | 人读形态 | 必须与 ① 逐行一致 |
+
+机械保障：`CaseParserTest#criteriaTypeCatalogContentIsLocked` 锁 ①② 的逐条内容
+（原先是只锁数量的 `assertEquals(9, TYPES.size())`——改名/改 `since`/改 `params` 都不会红，那是漂移的温床）；
+③ 的对账快照在 `test/criteria/criteria-types.json`，比对方法见 `test/criteria/README.md`。
+
+**判据类型的引入版本**（`since`，口径同动作的 `since`）：
+
+| type | since |
+|---|---|
+| `artifact-exists` / `artifact-nonempty` / `json-field` / `world-hash-equals` / `event-emitted` | 1.0 |
+| `image-size-equals` / `image-not-uniform` | 1.1 |
+| `te-state-equals` / `image-uniform` | 1.2 |
+
+**v1.6 没有新增判据类型**：`action` 段是**段**的扩充（编排能力），不是判据词汇的扩充——
+编排步骤的期望值由 §3.2 的 `expect`（逐步断言）承担，跑完之后的结论仍由既有 9 种判据在
+`criteria` 段求值。因此 `criteriaTypes` 在 v1.6 逐字不变，**这正是对账要证明的事**。
 
 ## 6. variants 段（负对照，C6/V3 落地）
 
@@ -103,7 +385,9 @@
 
 ## 8. 执行语义
 
-1. **整跑**：`POST /cp/v1/actions/case.run {file|inline, confirm:true}` → 依序执行 world→build→(capture)→(shots)→criteria→evidence。
+1. **整跑**：`POST /cp/v1/actions/case.run {file|inline, confirm:true}` → 按 §1 的**九段执行序**依次执行
+   （段序即执行序，权威 `CaseValidator.SEGMENTS`；**没有 `shots` 段**——截图属 `cameras` 段，
+   `shots/` 只是机位产物的落点目录名，照 `shots` 写 `segments:[...]` 会得 `CP-VALID-002`）。
 2. **按段**：`segments:["world","build"]` 只跑指定段；段间状态是真实世界状态（不是重放），因此**按段连跑的结果必须与整跑一致**（验收锚）。判据段在新 run 中求值时，若引用的产物在本 run 不存在，必须**从当前世界状态重新产出**（如重新扫描托管区域生成 scene-manifest.json）再求值。
 3. 每段产出 `segments/<name>.json`（状态、耗时、产物引用；skipped/deferred 段也先落记录）；**`observation.json` 必须在判据段求值之前落盘**（判据可引用它）；判据汇总 `criteria.json`（纯判据语义），证据核对结论落 `evidence.json`（schema `lightning.cp-evidence/1`），合并结论在 `result.overall`（判据与证据任一红/错即 red）。
 4. run 目录：`<mcDataDir>/controlplane/runs/<yyyyMMdd-HHmmss>-<caseId>-<jobSeq>/`（jobSeq 为数字作业序号，jobId 形态 `j<seq>`），全程只增不改；`manifest.json`（schema `lightning.cp-manifest/1`）登记全部产物的 sha256。tokens/server 内部文件 schema 分别为 `lightning.cp-tokens/1`、`lightning.cp-server/1`。`case.run` 必须把 runId 挂上作业（`GET /cp/v1/jobs/{id}` 可见）。
@@ -111,8 +395,210 @@
 6. 失败即停（ fail-fast ），已完成的段保留产物；`job` 结果携带失败段与错误码。
 7. `world.rebuild` 结果含 `sceneManifestSha256`；`world-hash-equals` 判据的哈希口径：first=本 run build 段产物（按段续跑时取存档内清单），current=服务端世界按清单位置**实读回读**后的规范化哈希——世界未漂移时两者相等，漂移时如实判红。场景清单哈希只覆盖 `{blocks:[{pos,blockId,meta}], tileEntities:[{pos,class}]}`（键排序无空白 sha256，pos 升序）；注册名/种子不入哈希——哈希回答「世界是不是同一场景」。清单另含 `teReads:[{pos,completer,state,sha256}]`（PR-3：te 步描述器输出快照），**不进清单哈希**——它只是审计快照，改它不影响幂等判据。
 
+### 8.8 hermetic 纪律（验收类固定程序必须起手重建世界）
+
+> 本节成文 #93 的处置口径，是 #96 §12 对 #93「解除条件」的落地。**它是纪律，不是能力**——
+> `world.rebuild` 早已具备（§2 的 `void:true` + 契约 §6.3 的「删除 → 建虚空世界」），
+> 缺的是「验收必须先走它」这条硬要求。
+
+**规则**：凡以「同参同世界、结论可复算」为前提的固定程序（回归套件、锚点用例、逐帧导出复现、
+任何要跨轮比较哈希的验收），其**第一次世界写动作必须是 `world.rebuild`**（`void:true`），
+不得在既有世界上续跑。
+
+**理由（#93 的实测机理）**：老一代套件复用专用世界文件夹（`level.dat` 存在即复用），清场走 FMP
+`remPart`——**只拆部件、不拆方块**。上一轮运行若中断，残留方块（torch/chest 等）留在世界里污染
+下一轮，三套件同族红签名（`minecraft:torch:0 应为 12 实际 14` 等）都无法区分「产品回归」与「世界脏」。
+只要起手不换世界，「同参同世界」这个前提就**不成立**，任何跨轮哈希比较都是无根之木。
+
+**为什么 `world.rebuild` 够用**：它走「卸载 → **整目录删除** → 固定种子建虚空世界」（契约 §6.3），
+残留不可能跨轮存活；`void:true` 是全虚空（无基岩无土层），世界本身不产生任何计划外方块。
+因此「起手重建」＝「这个世界是全新的」，前提重新成立。
+
+**与 `case.run` 的 `world` 段的关系（语义不冲突，逐条对齐）**：
+
+| 项 | `case.run` 的 `world` 段 | hermetic 纪律 | 是否冲突 |
+|---|---|---|---|
+| 实现 | `WorldRebuildRunner`（`CaseRunAction.stepWorld`，见 §2） | 要求走 `world.rebuild` | 否——**同一实现**，契约 §6.3 明写「共用同一实现」 |
+| 语义 | 卸载 → 删目录 → 建虚空世界（**只重建世界**，构建步在 `build` 段） | 起手换掉世界 | 否——正是纪律要的那一步 |
+| `void` | §2 必填且只许 `true` | 要求 `void:true` | 否——口径一致 |
+| 段序 | 九段固定序（§1，权威 `CaseValidator.SEGMENTS`） | 要求 world 在**第一次世界写之前** | 否——`world` 是首段 |
+| 产物 | 写 run 内 `world/scene-manifest.json` + 存档内 `scene-manifest.json` | 不涉及 | 否 |
+| 幂等 | 同参两次 `sceneManifestSha256` 相等 | 跨轮可比的前提正是它 | 否——纪律依赖它成立 |
+
+**因此**：`case.run` 的 `world` 段**就是** hermetic 纪律在固定程序里的落点，二者是同一件事的两种说法，
+无需改 `case.run` 语义。纪律要管的是**程序怎么写**（`world` 段必须存在且必须重建，不能省略、
+不能让程序接着上一轮的世界跑），不是**设施怎么实现**。
+
+**执行层约束（三条，可判定）**：
+
+1. **`world` 段不得省略**：验收类用例的 `world` 段必填且 `void:true`（已有校验，§2）。
+   只跑判据段（`segments:["criteria"]`）这类续跑**只有在同一轮内**才合法——跨轮续跑即违反纪律。
+2. **不得隐式复用上一轮的世界**：程序起手要么 `world.rebuild`，要么 `case.run` 的 `world` 段；
+   任何「先探一下世界在不在、在就接着用」的写法都违反本节。
+3. **轮内清场不等于起手重建**：`scene.entity.clear`（#99）等轮内原语清实体但不清方块、不清背包、
+   不重置天气时间，**不构成 hermetic 保证**，不能替代起手重建。
+4. **L1 玩家操作也是世界写动作（#101 明确）**：`player.*`（见 contract.md §4.6）会改方块、背包、
+   实体与玩家位置，因此**同样受本节约束**——它们开场一律过写入门控
+   （捕获会话期间被别的作业调用即 `CP-STATE-001`），且**不得**被当作「起手重建的替代品」：
+   程序起手仍必须是 `world.rebuild`（或 `case.run` 的 `world` 段），L1 只能发生在**其后**。
+   反向也成立：L1 的产物**不构成** hermetic 保证（走过一段路不改变「世界是不是全新的」这件事）。
+
+**留痕**：`world.rebuild` 的删除阶段落 `world-rebuild` 事件（含 folder/seed），与
+`sceneManifestSha256` 一同构成「本轮确实从新世界开始」的可审计证据链。
+**标记前置另落两条 `world-rebuild` 事件**（v1.7，#123）：`标记已前置（构建中）`（`complete:false`）
+与 `托管世界重建完成` —— 于是「这一次构建有没有走到收口」在事件流水里可判，
+不必去读盘上的标记文件。
+
+5. **「重建完成」由标记的 `complete` 表达（v1.7，#123）**：`case.run` 的 `world` 段**不**收口
+   （`complete:false`），由随后的 `build` 段在场景铺好、清单落盘后收口（`complete:true`）；
+   用例没有 `build` 段时 `world` 段自己收口。故「世界是不是构建完成的成品」以 `cp_world.json` 的
+   `complete` 为准（`world.info` 的 `markerComplete` 可直接读），**不**以「跑没跑过 world 段」为准。
+   `complete:false` 的世界可删可重建但不可复用（不得被 `world.snapshot` 拍成快照）——
+   完整语义与两个判据见 contract.md §6.1/§6.6。
+
+**边界（如实标注）**：本节管**世界**的 hermetic（方块/TE/实体所在的那份存档）。
+**玩家侧状态**（背包、经验、药水效果、飞行）在 1.7.10 落 `<saves>/<folder>/playerdata/`，
+**在**存档目录内，因此随 `world.rebuild` 的整目录删除一并复位。
+**客户端侧**的易失渲染状态不在此列，由捕获层的会话纪律管（契约 §4.2）。
+
 ## 9. 文件解析与校验规则
 
 - 只接受 UTF-8 JSON；未知顶层字段报错（防笔误静默）；段内未知字段报错。
 - `case.validate` 返回规范化计划：解析后的段列表、每条判据的展开形态、期望证据清单、全部警告。
 - 坐标、id、阈值全部做范围校验；`CP-VALID-002` 的 `context.fields` 逐字段给原因。
+
+## 10. 产物比较模式（A3「同一固定程序执行两次，产物结构一致」的口径，v1.6 / #103 任务 2）
+
+> 需求书 §10 A3 的原文是「同一固定程序执行两次，产物结构一致」——**「结构」二字必须有定义**，
+> 否则这句话不可判定。本节把它拆成四种可执行的比较模式 + 一张可审的豁免字段表。
+> 本节是 `test/expected/` 基准的比对口径来源，也是 A3 验收（两次 run 的比对记录）的判定依据。
+
+### 10.1 四种比较模式（逐产物声明，四选一）
+
+| 模式 | 语义 | 典型产物 | 判定方式 |
+|---|---|---|---|
+| `byte-equal` | 逐字节相同 | `world/scene-manifest.json` 的 `blocks`/`tileEntities` 段、导出件正文 | 两侧文件字节序列相等（sha256 相等是充分条件） |
+| `canonical-hash-equal` | 规范化 JSON（键排序、无空白）的 sha256 相同 | `criteria.json` 的判据结论集、`scene-manifest.json` 的 `sha256` 字段 | 两侧 `Json.canonical` 后取 sha256 相等 |
+| `structural-equal` | 结构相同（键集合 + 类型 + 数组长度 + 值按同一豁免表归一后相等） | `observation.json`、`segments/*.json`、`evidence.json` | 递归比较：键集合相等、类型相等、数组长度相等、值按 §10.2 归一后相等 |
+| `presence-only` | 只要求存在且非空 | 图像/截图（`shots/*.png`）、拼接片（`shots/*.tiles/r*c*.png`）、`logs/*` | 文件存在且字节数 > 0 |
+
+**为什么是四种而不是一种**：`byte-equal` 最严但绝大多数产物做不到（时间戳/runId 天然每次不同）；
+`presence-only` 最松但图像只能这么比（像素内容会话易失，#59 的 LP 空壳 VBO 事件已证）。
+把模式**逐产物声明**而不是全局放宽，是为了让「这次为什么只比在场」有一个可审的落点——
+「跑不过就放宽」与「按机理豁免」的区别就在这里。
+
+### 10.2 豁免字段表（逐条给契约或机理出处，**豁免要能被审**）
+
+| 字段 | 出处 | 为什么豁免 | 适用模式 |
+|---|---|---|---|
+| `runId` | 所有 run 产物 | 形态 `<yyyyMMdd-HHmmss>-<caseId>-<jobSeq>`（§8.4），含时间戳，天然每次不同 | 全部 |
+| `createdAt` / `generatedAt` / `recordedAt` / `readAt` / `regeneratedAt` | `manifest.json` / `criteria.json` / `evidence.json` / `segments/*.json` / `read/*.json` | 挂钟时间 | 全部 |
+| `durationMs` | `segments/*.json` | 耗时 | 全部 |
+| `runDir` / `runsRoot` / 绝对路径 | `read/run.json`、`segments/*.json` | 含 `<mcDataDir>` 绝对前缀，跨机器不同 | 全部 |
+| `playerPos` / `worldTime` / `sinceEnterMs` / `totalTime` | `world.json`、`observation.json` | 实时状态（进图时间、玩家微调位置、世界时钟） | 全部 |
+| `observation.artifacts[].sha256` / `bytes` | `observation.json` | 随产物变化；产物本身若已豁免，其哈希也豁免 | 全部 |
+| `world/scene-manifest.json` 的 `mismatches[]` | 实测 | 是**留痕**不是期望值（如 `minecraft:chest` 的 meta 被世界从 0 改写为 3） | 全部 |
+| `teReads[]` | `scene-manifest.json` | **契约已明写**不进清单哈希（§8.7），只是审计快照 | 全部 |
+| 图像像素内容 | `shots/*.png` | 渲染状态会话易失（#59 VBO 事件）；图像只做「存在 + 尺寸 + 主色占比阈值」判定 | `presence-only` |
+| `jobSeq` | `manifest.json` | 作业序号，进程内单调递增，跨轮必然不同 | 全部 |
+
+**新增豁免必须在本表留下理由与出处**。豁免的准入标准只有一条：**能指到契约条款或已实测的机理**。
+「这次跑不过所以先豁免它」不是理由——那正是把 A3 变成纸面口径的方式。
+
+### 10.3 比较对象（比哪些产物）
+
+| 产物 | 模式 | 说明 |
+|---|---|---|
+| `world/scene-manifest.json` | `canonical-hash-equal`（整份）+ `byte-equal`（`blocks`/`tileEntities` 两段） | 哈希回答「世界是不是同一场景」；两段字节相等回答「清单文本是不是逐字一样」 |
+| `criteria.json` | `canonical-hash-equal`（`criteria[]` 的 `{id,type,verdict}` 投影） | 判据**结论**必须逐条一致；`detail` 里的人读文字不参与（可含读数） |
+| `evidence.json` | `canonical-hash-equal`（`{overall, verdict}` 投影） | 结论一致 |
+| `observation.json` | `structural-equal` | 结构必须一致（版本/客户端配置/产物引用齐备），值按 §10.2 归一 |
+| `segments/*.json` | `structural-equal` | 逐段结构一致（`segment`/`status`/`detail` 键集合与类型） |
+| `shots/*.png` | `presence-only` | 存在且非空；尺寸与主色占比由**判据**（`image-size-equals` 等）承担，不由比对器承担 |
+| `read/*.json`、`action/*.json` | `canonical-hash-equal`（豁免归一后） | 读数/编排产物必须逐字一致（它们是判据的输入，不一致即判据不可复算） |
+
+### 10.4 可执行方式（口径不能是纸面的）
+
+比对器在 `test/expected/compare-runs.mjs`：输入两个 run 目录（或一个 run + 一份基准清单），
+逐产物按 §10.3 声明模式比较，输出机读 JSON + 人读表，退出码 `0`=全一致 / `2`=有差异 / `3`=设施错误。
+
+```bash
+# 两次 run 互比（A3 的标准形态）
+node test/expected/compare-runs.mjs --a <runDirA> --b <runDirB> --json-out compare.json
+
+# 与基准清单比（expected/ 的形态）
+node test/expected/compare-runs.mjs --run <runDir> --baseline test/expected/<caseId>/manifest.json
+```
+
+**证伪要求（判据不恒绿）**：比对器必须对「改坏」变红。`test/expected/` 里附一份
+篡改记录（把某一产物改一个字节 / 改一个字段 → 比对器必须以 2 退出并**指名**该产物），
+否则「基准」只是死文件。
+
+### 10.5 自引用产物：`read/run.json`（#103 实机实测，必须单列一条）
+
+`read.run` 枚举的是**整个 runs/ 目录**，因此它必然包含**本 run 自己**，条目数与总字节数
+随 runs 目录里的 run 数**单调增长**（实机：3554B → 9206B → 16047B）。
+
+**它不是「同参同产物」**——同一份固定程序跑两次，它的值必然不同，而这**不是漂移**。
+因此它的比较模式固定为 `presence-only`（存在且非空）。把它的内容纳入值比较，
+会让**任何** A3 比对恒红，从而把 A3 变成一句做不到的话。
+
+**这条不是豁免宽松化，而是口径的正确归属**：`read.run` 的语义是「此刻有哪些 run」，
+那是**关于设施的问题**，不是**关于这个世界的问题**；后者才是固定程序要复现的东西。
+
+### 10.6 豁免的两条纪律（从本单的实机比对过程里提炼）
+
+A3 的成文口径不是一次写成的。本单实机跑了三轮，前两轮的比对报告直接决定了口径的最终形态；
+两条纪律是那三轮的产物，写在这里以免后来者重犯：
+
+1. **豁免必须按路径，不能按字段名**。`artifacts[].sha256` 要豁免（它随产物变化），
+   但 `world/scene-manifest.json` 的 `sha256` **恰恰是要比的核心值**——把 `sha256` 写成全局豁免字段
+   会连带把它挡掉（首轮实现就是这么写的）。正确形态：`**/artifacts/*/sha256` 这样的**路径**豁免。
+   同族的例子：`chunks.loaded`（实时计数，豁免）vs `world.loaded`（布尔「加载了没」，**不**豁免）——
+   同名字段、不同语义。
+2. **豁免必须由证据支持，不是由建议支持**。前置盘点的 taxonomy 草案曾建议豁免
+   `mismatches` 与 `teReads`；实机两轮证明二者**逐字可复现** ⇒ **撤回豁免**，
+   并加断言锁住「它们参与比较」。`mismatches` 的语义说明（「是留痕不是期望值」）不构成
+   非确定性的证明——留痕也可以是可复现的。
+
+   反向也一样：`read/overview.json` 的世界时钟、天气倒计时、已加载区块计数，
+   在**实机比对报告里被指名**为逐轮不同，才获得豁免资格。
+
+**第三步是「人读文字」这一类**：`summary`/`detail`/`note`/`message`/`reason` 这些字段按设计会
+引用 runId、字节数、绝对路径（观测记录的 `summary` 就是给离线解释用的）。它们的作用是**解释**，
+不是**断言**——真正的断言是与它们并列的 `verdict`/`status`/`sha256`。
+因此这一类**只豁免内容、不豁免结构**：`detail` 从字符串变成对象、或整个键消失，都必须红。
+
+### 10.7 步骤间收敛（`action` 段专有，v1.6 / #103）
+
+`action` 段在**单次 `advance`** 里逐条跑完（其成员是同步动作，v1.8 起另有输入族步进动作这一例外，
+见 §3.2），而 L1（`player.*`）的请求是**包**：客户端发出 C03/C07/C08，服务端在它自己线程的 tick 里处理
+（`MinecraftServer.updateTimeLightAndEntities → networkTick`）。因此「上一步发了包」与
+「下一步能读到它的后果」之间隔着服务端的一拍；**更微妙的是 `scene.*` 也走同步出口**
+（如 `scene.player.pose` 的 S08 是服务端→客户端方向），而本段阻塞在客户端 tick 线程上——
+客户端自己那一拍因此永远不来。
+
+**因此本段在每步之后做一次往返收敛**（`PlayerSession.completeClientRequest`：
+flush 入站包 + 等服务端 tick，与 L1 动作回读前的收尾同一份实现），`read.*` 除外（纯读）。
+等待时长写进该步的段记录 `settleMs`（失败记 −1），让「等了多久」**可见**而不是隐式。
+
+**输入族步进步不走这条路**（§3.2 规则 7）：它是墙钟等待，而输入步要的「等」是**tick 推进**——
+既有的收敛实现不得用于输入步（契约 §9.2 第 4 条）。输入步因此不写 `settleMs`。
+
+**这是「逐步」二字的题中之义**：没有它，「第 N 步的结果」就不是「第 N 步做完之后的世界」，
+逐步断言会系统性地假红（实机形态：`player.move` 的 `serverBefore` 还是上一步之前的位置，
+`movedServerBlocks=0`、`observed=false`）。
+
+### 10.8 `core.shutdown` 的退出码来源：读**两份**结论（v1.6，实测缺陷的成文）
+
+`core.shutdown` 的退出码对齐的「run 结论」= **`criteria.json` 与 `evidence.json` 两份的
+合并结论**（任一非绿即红），与 `case.run` 的作业结果 `overall` 逐字同源。
+
+**为什么不能只读一份**：两份文件的语义不同、不可互替——
+`criteria.json.overall` 是用例声明的**判据**结论，`evidence.json.overall` 是**期望证据核对**
+结论（该在场的产物在不在）。实机实测确实存在 `criteria=red` 而 `evidence=green` 的 run
+（一次 `l1-orchestration` 的 2 条判据红、12 项期望产物齐备）。只读其一会对那次红跑返回
+**0「判据全绿」**——那是把一次红跑读成绿跑，是本动作最不该犯的错。
+
+run 目录里**没有**持久化「合并结论」的字段（job result 里的 `overall` 只活在内存与响应里），
+因此退出码必须由这两份文件**重新合并**得出；合并规则不重造，与 `CaseRunAction.overall()` 同一口径。

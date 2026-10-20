@@ -16,7 +16,7 @@ export const SelectOperator: OperatorType = {
   description: '点击选择方块/注解，重复点击轮换',
 
   poll(ctx) {
-    return ctx.getDoc().value !== null
+    return ctx.hasLoadedDocument()
   },
 
   invoke(ctx, _props, event) {
@@ -59,7 +59,7 @@ export const SelectAllOperator: OperatorType = {
   flagUndo: false,
 
   poll(ctx) {
-    return ctx.getDoc().value !== null
+    return ctx.hasLoadedDocument()
   },
 
   exec(ctx, _props) {
@@ -75,7 +75,7 @@ export const SelectByTypeOperator: OperatorType = {
   description: '选中当前帧所有相同类型的方块',
 
   poll(ctx) {
-    return ctx.getDoc().value !== null
+    return ctx.hasLoadedDocument()
   },
 
   exec(ctx, props) {

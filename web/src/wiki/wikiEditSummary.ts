@@ -1,4 +1,3 @@
-import type { RuntimeDocument } from '@/context/runtimeDocument'
 import { EMBED_INITIAL_VIEW_META_KEY } from '@/context/embedInitialView'
 
 /** 保存到灰机 Data:Structures 时的默认编辑摘要 */
@@ -110,14 +109,28 @@ function composeSummary(lines: WikiChangeLine[]): string {
   return text
 }
 
-/** 对比 baseline 与当前文档，生成保存摘要草稿（不访问 mw） */
+/**
+ * 对比 baseline 与当前文档，生成保存摘要草稿（不访问 mw）。
+ *
+ * ## #301 P10f D3 的入参改造（`current` 由旧文档改为**产物 plain**）
+ *
+ * 本函数做的比较**全部**是 plain 键级比较（`meta.*` / `tooltipPalette` /
+ * `cellTooltipGrid` / `annotations` / `labels`）—— 它从来不需要旧文档的**类型**，
+ * 只需要那份 plain。故 `current` 直接吃 `ctx.plainForSave().plain`
+ *（保存/导出的**唯一**产物入口，与真正写出去的那份**同一来源**）。
+ *
+ * ⚠️ `baseline` 是**产物 plain 的冻结快照**（M8-2 收口；旧类型是解析器的
+ * `RuntimeDocument`，比较前要 `.serialize()`，而那份投影与内核产物**不同空间**：
+ * tooltip 池会按首次使用重排 ⇒ 刚装载就报"有变更"）。现在两边同空间，
+ * "无差异"才真的等于"与保存基线相同"。
+ */
 export function buildWikiEditSummaryDraft(
-  baseline: RuntimeDocument | null,
-  current: RuntimeDocument | null,
+  baseline: Readonly<Record<string, unknown>> | null,
+  current: Readonly<Record<string, unknown>> | null,
 ): WikiEditSummaryDraft | null {
   if (!baseline || !current) return null
-  const b = baseline.serialize() as Record<string, unknown>
-  const c = current.serialize() as Record<string, unknown>
+  const b = baseline
+  const c = current
   const lines: WikiChangeLine[] = []
 
   const metaKeys = ['title', 'description', 'author', 'version'] as const

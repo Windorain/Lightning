@@ -21,6 +21,7 @@ import com.lightning.mod.client.controlplane.core.Json;
 import com.lightning.mod.client.controlplane.core.Router;
 import com.lightning.mod.client.controlplane.core.TimeSource;
 import com.lightning.mod.client.controlplane.core.TokenStore;
+import com.lightning.mod.client.controlplane.mc.input.InputRuntimeImpl;
 import com.lightning.mod.config.SdeControlPlaneConfig;
 
 import cpw.mods.fml.common.FMLCommonHandler;
@@ -36,7 +37,8 @@ import cpw.mods.fml.common.FMLCommonHandler;
  * EventStream(events.jsonl) → TokenStore.generate()+save(tokens.json) → ArtifactStore(runs/)
  * → ActionRegistry + ActionRegistrar.registerAll(8 动作)
  * → JobRegistry → JobQueue.setStepper(ActionSteppingExecutor) → Router → CoreEndpoints.registerAll()
- * → ControlPlaneServer.start() → installShutdownHook() → 注册 ControlPlaneTickHandler 到 FML 总线
+ * → ControlPlaneServer.start() → setShutdownCleanup(#166 进程退出尽力释放) → installShutdownHook()
+ * → 注册 ControlPlaneTickHandler 到 FML 总线
  * → 注册 ServerBuildPump（服务端 tick 线程推进场景构建，#89 评论 1689）
  * </pre>
  *
@@ -226,6 +228,21 @@ public final class ControlPlaneBootstrap {
             CpLog.error(e, "控制面启动失败：%s", failureReason);
             return false;
         }
+
+        // 【#166 DR-3】进程正常退出的 best-effort 输入清理（契约 §3.4 路径 5）：挂到**既有**的
+        // shutdown hook 上（core 层只留回调口，本层才知道输入设施）。整段 try/catch 由钩子兜底
+        // （core/ControlPlaneServer.runShutdownCleanup：吞掉一切异常、只 WARN 一次），这里只提供
+        // 「经唯一实现点（InputRuntimeImpl.shared() 的释放入口）投递抬起」这一件事。
+        srv.setShutdownCleanup(new Runnable() {
+
+            @Override
+            public void run() {
+                // 退出钩子不在 tick 线程上 ⇒ 走 releaseAllForShutdown（不校验 owner 线程的
+                // best-effort 入口；直接调 releaseAll() 在真的持有按键时必然抛）
+                InputRuntimeImpl.shared()
+                    .releaseAllForShutdown();
+            }
+        });
 
         srv.installShutdownHook();
         server = srv;

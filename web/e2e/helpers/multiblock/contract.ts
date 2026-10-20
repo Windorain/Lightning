@@ -220,11 +220,12 @@ export function declarationViolations(
   if (doc.ruleCount !== c.ruleCount) {
     v.push(`差异规则条数=${doc.ruleCount}，期望 ${c.ruleCount}`)
   }
-  if (doc.frameCount !== c.frameCount) {
-    v.push(`帧数=${doc.frameCount}，期望 ${c.frameCount}（一变体一帧）`)
+  // M5-1：多方块文档的帧清单是**场景**（变体配置集合），不是时间轴 ⇒ 内核帧轴恒 0。
+  if (doc.frameCount !== 0) {
+    v.push(`时间轴帧数=${doc.frameCount}，期望 0（场景不是时间轴）`)
   }
-  if (doc.multiblockFrameCount !== c.frameCount) {
-    v.push(`帧声明数=${doc.multiblockFrameCount}，期望 ${c.frameCount}`)
+  if (doc.multiblockSceneCount !== c.frameCount) {
+    v.push(`场景声明数=${doc.multiblockSceneCount}，期望 ${c.frameCount}（一变体一场景）`)
   }
   if (
     !doc.totalTierDomain ||
@@ -238,8 +239,19 @@ export function declarationViolations(
   if (doc.blockPaletteSize !== c.blockPaletteSize) {
     v.push(`调色板条目数=${doc.blockPaletteSize}，期望 ${c.blockPaletteSize}`)
   }
+  // `warnings` 的来源（R2/S3 起）= **测试进程重解析内核源根**（见 `harness#withSourceParse`）：
+  // 旧来源 `doc.multiblock.warnings` 随 `Context#legacyRenderSource()` 一起退役。
   if (doc.warnings.length > 0) {
-    v.push(`解析告警非空：${doc.warnings.join(' | ')}`)
+    v.push(`解析告警非空（内核源根重解析）：${doc.warnings.join(' | ')}`)
+  }
+  // **伴随断言**（R2/S3，Lead 裁决 ④ 要求）：应用侧观测到的声明内容必须 = 重解析得到的
+  // 对应值 —— 用**内容**证明"应用解析的就是这份 body"。缺它时"告警为空"可能只是
+  // "重解析了别的字节"，判据就退化成"文件本身没瑕疵"而不再是"应用读的是它"。
+  if (doc.declarationMatchesSource !== true) {
+    v.push(
+      `应用侧声明与内核源根重解析不一致（declarationMatchesSource=${doc.declarationMatchesSource}）`
+      + '：不得用"告警为空"掩盖"应用解析的不是这份 body"',
+    )
   }
   return v
 }

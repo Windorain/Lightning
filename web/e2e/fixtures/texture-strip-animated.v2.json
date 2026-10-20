@@ -1,0 +1,382 @@
+{
+  "format_version": "2.0",
+  "id": "e2e-texture-strip",
+  "meta": {
+    "name": "E2E Texture Strip (animated)",
+    "author": "",
+    "created_at_ms": 0,
+    "description": "M5-3 纹理时间夹具：3×3×3 实心网格 + 16×64 四色竖条（帧 0 顶）+ mcmeta 声明",
+    "tags": [],
+    "origin": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+    }
+  },
+  "frames": [
+    {
+      "index": 0,
+      "structure": {
+        "geometryPhase": "baked",
+        "cellGrid": [
+          [
+            [
+              1,
+              1,
+              1
+            ],
+            [
+              1,
+              1,
+              1
+            ],
+            [
+              1,
+              1,
+              1
+            ]
+          ],
+          [
+            [
+              1,
+              1,
+              1
+            ],
+            [
+              1,
+              1,
+              1
+            ],
+            [
+              1,
+              1,
+              1
+            ]
+          ],
+          [
+            [
+              1,
+              1,
+              1
+            ],
+            [
+              1,
+              1,
+              1
+            ],
+            [
+              1,
+              1,
+              1
+            ]
+          ]
+        ],
+        "blockPalette": [
+          {
+            "registryId": "air",
+            "meta": 0,
+            "renderMode": "BakedQuads",
+            "geometry": {
+              "encoding": "bakedQuadsJsonV1",
+              "quads": []
+            },
+            "occludesAdjacentFaces": false,
+            "tooltip": []
+          },
+          {
+            "registryId": "tectech:gt.godforgecasing",
+            "meta": 0,
+            "renderMode": "BakedQuads",
+            "geometry": {
+              "encoding": "bakedQuadsJsonV1",
+              "quads": [
+                {
+                  "materialIndex": 0,
+                  "vertices": [
+                    {
+                      "x": 0,
+                      "y": 0,
+                      "z": 1,
+                      "u": 0,
+                      "v": 1,
+                      "brightness": 14680064,
+                      "color": -8421505
+                    },
+                    {
+                      "x": 0,
+                      "y": 0,
+                      "z": 0,
+                      "u": 0,
+                      "v": 0,
+                      "brightness": 14680064,
+                      "color": -8421505
+                    },
+                    {
+                      "x": 1,
+                      "y": 0,
+                      "z": 0,
+                      "u": 1,
+                      "v": 0,
+                      "brightness": 14680064,
+                      "color": -8421505
+                    },
+                    {
+                      "x": 1,
+                      "y": 0,
+                      "z": 1,
+                      "u": 1,
+                      "v": 1,
+                      "brightness": 14680064,
+                      "color": -8421505
+                    }
+                  ]
+                },
+                {
+                  "materialIndex": 0,
+                  "vertices": [
+                    {
+                      "x": 1,
+                      "y": 1,
+                      "z": 1,
+                      "u": 1,
+                      "v": 1,
+                      "brightness": 15728640,
+                      "color": -1
+                    },
+                    {
+                      "x": 1,
+                      "y": 1,
+                      "z": 0,
+                      "u": 1,
+                      "v": 0,
+                      "brightness": 15728640,
+                      "color": -1
+                    },
+                    {
+                      "x": 0,
+                      "y": 1,
+                      "z": 0,
+                      "u": 0,
+                      "v": 0,
+                      "brightness": 15728640,
+                      "color": -1
+                    },
+                    {
+                      "x": 0,
+                      "y": 1,
+                      "z": 1,
+                      "u": 0,
+                      "v": 1,
+                      "brightness": 15728640,
+                      "color": -1
+                    }
+                  ]
+                },
+                {
+                  "materialIndex": 0,
+                  "vertices": [
+                    {
+                      "x": 0,
+                      "y": 1,
+                      "z": 0,
+                      "u": 1,
+                      "v": 0,
+                      "brightness": 15728640,
+                      "color": -3355444
+                    },
+                    {
+                      "x": 1,
+                      "y": 1,
+                      "z": 0,
+                      "u": 0,
+                      "v": 0,
+                      "brightness": 15728640,
+                      "color": -3355444
+                    },
+                    {
+                      "x": 1,
+                      "y": 0,
+                      "z": 0,
+                      "u": 0,
+                      "v": 1,
+                      "brightness": 15728640,
+                      "color": -3355444
+                    },
+                    {
+                      "x": 0,
+                      "y": 0,
+                      "z": 0,
+                      "u": 1,
+                      "v": 1,
+                      "brightness": 15728640,
+                      "color": -3355444
+                    }
+                  ]
+                },
+                {
+                  "materialIndex": 0,
+                  "vertices": [
+                    {
+                      "x": 0,
+                      "y": 1,
+                      "z": 1,
+                      "u": 0,
+                      "v": 0,
+                      "brightness": 0,
+                      "color": -3355444
+                    },
+                    {
+                      "x": 0,
+                      "y": 0,
+                      "z": 1,
+                      "u": 0,
+                      "v": 1,
+                      "brightness": 0,
+                      "color": -3355444
+                    },
+                    {
+                      "x": 1,
+                      "y": 0,
+                      "z": 1,
+                      "u": 1,
+                      "v": 1,
+                      "brightness": 0,
+                      "color": -3355444
+                    },
+                    {
+                      "x": 1,
+                      "y": 1,
+                      "z": 1,
+                      "u": 1,
+                      "v": 0,
+                      "brightness": 0,
+                      "color": -3355444
+                    }
+                  ]
+                },
+                {
+                  "materialIndex": 0,
+                  "vertices": [
+                    {
+                      "x": 0,
+                      "y": 1,
+                      "z": 1,
+                      "u": 1,
+                      "v": 0,
+                      "brightness": 15728640,
+                      "color": -6710887
+                    },
+                    {
+                      "x": 0,
+                      "y": 1,
+                      "z": 0,
+                      "u": 0,
+                      "v": 0,
+                      "brightness": 15728640,
+                      "color": -6710887
+                    },
+                    {
+                      "x": 0,
+                      "y": 0,
+                      "z": 0,
+                      "u": 0,
+                      "v": 1,
+                      "brightness": 15728640,
+                      "color": -6710887
+                    },
+                    {
+                      "x": 0,
+                      "y": 0,
+                      "z": 1,
+                      "u": 1,
+                      "v": 1,
+                      "brightness": 15728640,
+                      "color": -6710887
+                    }
+                  ]
+                },
+                {
+                  "materialIndex": 0,
+                  "vertices": [
+                    {
+                      "x": 1,
+                      "y": 0,
+                      "z": 1,
+                      "u": 0,
+                      "v": 1,
+                      "brightness": 0,
+                      "color": -6710887
+                    },
+                    {
+                      "x": 1,
+                      "y": 0,
+                      "z": 0,
+                      "u": 1,
+                      "v": 1,
+                      "brightness": 0,
+                      "color": -6710887
+                    },
+                    {
+                      "x": 1,
+                      "y": 1,
+                      "z": 0,
+                      "u": 1,
+                      "v": 0,
+                      "brightness": 0,
+                      "color": -6710887
+                    },
+                    {
+                      "x": 1,
+                      "y": 1,
+                      "z": 1,
+                      "u": 0,
+                      "v": 0,
+                      "brightness": 0,
+                      "color": -6710887
+                    }
+                  ]
+                }
+              ]
+            },
+            "occludesAdjacentFaces": true,
+            "tooltip": [
+              "Texture Strip"
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "annotations": [],
+  "labels": [],
+  "materialPalette": [
+    {
+      "textureBlobIndex": 0,
+      "kind": "animated",
+      "blend": "opaque",
+      "animation": {
+        "defaultFrametimeTicks": 2,
+        "frameSequence": [
+          {
+            "index": 0
+          },
+          {
+            "index": 1,
+            "timeTicks": 3
+          },
+          {
+            "index": 2,
+            "timeTicks": 1
+          },
+          {
+            "index": 3,
+            "timeTicks": 2
+          }
+        ]
+      }
+    }
+  ],
+  "textureBlobs": {
+    "0": "iVBORw0KGgoAAAANSUhEUgAAABAAAABACAYAAAATffeWAAAAPElEQVR42u3WsREAMAzCQJH9dyZFsoEbF9IAX3KkUAYdhgkICGwBQt0DAQGBvwfUPRAQEABI/QcCAgKvC+7RCXQE44OMAAAAAElFTkSuQmCC"
+  }
+}

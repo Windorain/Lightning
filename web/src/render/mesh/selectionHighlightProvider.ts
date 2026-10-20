@@ -2,7 +2,7 @@
 import * as THREE from 'three'
 import type { BlockRef, SelectedEntity } from '../schema/types'
 import type { PartMaskGeometry } from '@/pure/partMask'
-import { OUTLINE_MASK_LIMIT } from '@/pure/outlineLimits'
+import { OUTLINE_MASK_LIMIT } from '@/presentation/outlineBudget'
 import { buildBoxesMaskMesh, buildQuadsMaskMesh } from './maskGeometryBuild'
 
 /**

@@ -33,7 +33,13 @@
 只是没有 `id`/`enum`（见 §5.1）。→ 满足「未引入除「通道」「运行态」外的第三个轴」这一约束。
 
 **变体（variant）** = 一次通道取值 + 总 Tier + 运行态的具体选择。
-**帧（frame）** = 变体的存储原语，仍然是唯一一个（硬约束 2）。一个变体至少一帧，通常恰好一帧。
+**场景（scene）** = 变体的存储原语，仍然是唯一一个（硬约束 2）。一个变体至少一个场景，通常恰好一个。
+
+> **术语修订（M5-1，2026-10-18 用户裁决）**：本文档原先把这个存储原语叫「帧（frame）」，
+> 现在**概念上叫「场景（Scene）」**（Blender 的 Scene 语义）：它是**变体配置集合**，
+> 与时间轴无关、**永不参与播放**。播放/动画是通用关键帧 + 插值系统，场景切换 ≠ 动画。
+> ⚠️ **文件格式的键名仍是 `frames`**（外部格式兼容，不改）：适配器在边界上把
+> 「格式 `frames` 键」翻译成「领域场景清单」（`adapters/files/multiblockDeclaration#sceneOf`）。
 
 ---
 
@@ -104,7 +110,7 @@ normalizeEnvelope(raw):     既有 normalizeEnvelopeToPlain（payload base64 →
   "multiblockCount": 1,
   "multiblock":  { …§4… },
   "blockPalette": [ …§6… ],          // 所有变体的并集，签名全局去重
-  "materialPalette": [ … ],          // 既有结构（locator/atlas/blend/textureBlobIndex）
+  "materialPalette": [ … ],          // 既有结构（locator/kind/atlas/linear/useMipmaps/blend/animation/textureBlobIndex）
   "textureBlobs": [ … ],             // 既有结构（base64 PNG）
   "tooltipPalette": [ … ],           // 既有结构
   "frames": [ …§5.3… ],              // Frame = 变体存储原语
@@ -115,6 +121,23 @@ normalizeEnvelope(raw):     既有 normalizeEnvelopeToPlain（payload base64 →
 
 > **`blockPalette` 放根级**与 `liftBlockPaletteToRoot` 的既有做法完全一致（帧内不再各自持有一份调色板），
 > 故这是**复用**而不是新约定。帧为主的既有形态另有"把首帧 structure 展开到根级"的兼容约定，多方块文档**不采用**。
+
+### 3.1 `materialPalette[].blend`：**导出侧是权威**
+
+取值词表：`opaque` | `cutout` | `translucent`。**每条材质都必须声明**——缺席表示"这份产物不知道"，
+消费方只能按 `opaque` 兜底，于是玻璃会被画成不透明，而**产物本身看不出任何异常**（Gitea #2 实测：
+同一格两侧一个透出天空、一个是不透明的块）。
+
+判定规则（`client/export/MaterialBlendMode`，由 MC 1.7.10 的渲染分工推出，不是挑的）：
+
+| 条件 | `blend` | 依据 |
+|---|---|---|
+| `getRenderBlockPass() > 0` | `translucent` | pass 1 才开混合（`EntityRenderer:1378/:1396`） |
+| pass 0 且 `!isOpaqueCube()` | `cutout` | pass 0 有 alpha test（`GREATER 0.1`，:1113/:1289）、无混合 |
+| pass 0 且 `isOpaqueCube()` | `opaque` | 同上；整格不透明方块必然无透明纹素（否则光照/邻面剔除先坏） |
+
+`blend` 参与材质槽位的缓存键：同一张贴图在不同 pass 下出现时必须是两条材质，否则一方覆盖另一方
+且**没有任何报错**。
 
 ---
 
@@ -345,24 +368,31 @@ normalizeEnvelope(raw):     既有 normalizeEnvelopeToPlain（payload base64 →
 3. **只有两种夹取**：域夹取（上表）与耦合夹取（§7.2），都会落 `report.clamped` 并由 UI 提示；
    其余**任何情况都不拒绝装配** —— 滑杆走到任何位置都必然得到一个合法网格（T2.4 不需要错误分支）。
 
-### 5.3 帧（Frame = 变体存储原语，硬约束 2）
+### 5.3 场景（Scene = 变体存储原语，硬约束 2；**格式键名仍是 `frames`**）
+
+> **M5-1（2026-10-18 用户裁决）**：这里是**场景（Scene）**，即变体配置集合 ——
+> 与时间轴无关、**永不参与播放**。键名 `frames` 属外部格式，仅为兼容而保留；
+> 领域里对应的类型是 `MultiblockScene` / 声明字段 `scenes`。
 
 ```jsonc
 {
-  "index": 0,                      // 必填：帧序号（沿用既有帧语义：帧播放/分层预览都按它走）
-  "variant": "height:3|coil:0|glass:0|tt:2|runstate:idle",  // 必填：变体主键（frame → variant 的引用）
+  "index": 0,                      // 必填：场景序号（声明下标；与数组下标可不同）
+  "variant": "height:3|coil:0|glass:0|tt:2|runstate:idle",  // 必填：变体主键（scene → variant 的引用）
   "runstate": "idle",              // 必填：与 variant 的 runstate 一致（冗余但有校验价值）
-  "stepIndex": 2,                  // 必填：本帧用哪一阶骨架
+  "stepIndex": 2,                  // 必填：本场景用哪一阶骨架
   "rules": [ "coil.slot", "glass.rod", "runstate.face.h3.idle" ],  // 必填：本条变体引用的规则 id（**按序**）
-  "label": "…",                    // 可选：既有帧标注（UI 显示用）
-  "durationMs": 0,                 // 可选：既有帧字段（多方块文档不用，保留兼容）
+  "label": "…",                    // 可选：既有标注（UI 显示用）
+  "durationMs": 0,                 // 可选：既有字段（多方块文档**不用**；场景没有时长，也不参与播放）
   "cellGrid": [ … ]                // 可选：参考网格（校验/取证用；**生产产物必须省略**，见 §9.6）
 }
 ```
 
-- `frame.rules` 是**有序引用**。相位相同、顺序关键（"后写者胜"）时不靠数组下标隐式约定，
+- `scene.rules` 是**有序引用**。相位相同、顺序关键（"后写者胜"）时不靠数组下标隐式约定，
   而是显式给出 `{ "id": "…", "order": 0 }` 形式；纯字符串形式 = 声明顺序。
-- **帧不携带内联 ops**。校验器把 `frames[].ops` 的存在判为**硬失败**（那是组合展开的形态）。
+- **场景不携带内联 ops**。校验器把 `frames[].ops` 的存在判为**硬失败**（那是组合展开的形态）。
+- **场景清单不是时间轴**：多方块文档的 (`DocumentContent.frameAxis`) **恒为空**（`frameCount() === 0`），
+  帧控制/播放控件不属于这种文档；"当前选中的场景"由**通道取值**（`EditContext.channelValues`）决定，
+  不由播放时间决定。
 
 ### 5.4 装配算法（T2.2 照此实现；也是 T3.3 的判据来源）
 
@@ -372,8 +402,8 @@ ASSEMBLE(doc, variantKey) → cellGrid          # 纯查表 + 索引 + 区间写
   variant = variants.find(v => v.key == variantKey)          # 找不到 → 抛错
   effective, stepIndexRaw = RESOLVE(mb, variant)             # §5.2
 
-  frames = doc.frames.filter(f => f.variant == variantKey)   # 每变体 ≥1 帧
-  for frame in frames:                                       # 通常是 1 帧
+  scenes = doc.frames.filter(f => f.variant == variantKey)   # 每变体 ≥1 个场景（格式键 frames）
+  for frame in scenes:                                       # 通常恰好 1 个
       step = mb.backbone.sizeSteps[frame.stepIndex]          # 尺寸型已定阶
       grid = deepCopy(step.cellGrid)                         # ★ 必须深拷贝（同阶可能被多帧复用）
       dims = shape(grid) = {w, h, d}
@@ -519,7 +549,7 @@ GT 里通道值不可为 0；"未设置"的位置由**主通道值**（总 Tier�
 ```jsonc
 "viewerSemantics": {
   "frameIsVariant": true,
-  "playback": "variant-frames",           // 帧播放 = 变体播放（帧语义不变）
+  "playback": "variant-frames",           // 键名属文件格式；语义 = 场景不参与播放（M5-1）
   "layerPreview": "supported",            // 既有分层预览照旧可用
   "runstateCoverage": {
     "kind": "texture-material-swap",      // "texture-material-swap" | "none"

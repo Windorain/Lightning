@@ -1,0 +1,71 @@
+{
+  "schema": "lightning.cp-criteria-set/1",
+  "id": "evidence-completeness",
+  "kind": "evidence-completeness",
+  "title": "证据齐全：evidence.json overall=green 且 expect 逐条在场",
+  "requiresCase": "lp-pipe-row",
+  "inputContract": {
+    "reads": [
+      "<runDir>/evidence.json → {overall, expect[], verdict}",
+      "<runDir>/manifest.json → artifacts[]（产物清单与哈希）",
+      "<runDir>/observation.json → artifacts[]（观测记录的产物引用）"
+    ],
+    "produces": "机读断言表 + 缺失产物清单",
+    "order": "读 evidence.json → 逐条 expect 查盘 → 与 manifest 对账"
+  },
+  "assertions": [
+    {
+      "id": "evidence-overall-green",
+      "target": "<runDir>/evidence.json → /overall",
+      "expr": "overall == \"green\"",
+      "expect": "green",
+      "failSemantics": "判红：期望证据有缺项（verdict.missing 非空）",
+      "source": "anchor-checks.ps1::Test-EvidenceComplete（run-anchor.ps1 C6）"
+    },
+    {
+      "id": "evidence-expect-each-present-on-disk",
+      "target": "<runDir>/evidence.json → /expect[i]/path",
+      "expr": "逐条 path 在 run 目录里是普通文件",
+      "expect": "全部在场",
+      "failSemantics": "判红：清单说有、盘上没有（产物纪律破裂）",
+      "source": "anchor-checks.ps1::Test-EvidenceComplete"
+    },
+    {
+      "id": "evidence-manifest-lists-every-artifact",
+      "target": "<runDir>/manifest.json → /artifacts[]",
+      "expr": "每个非记账产物（除 manifest.json 自身）都在 manifest 里有 path/bytes/sha256 三件",
+      "expect": "逐条齐备且 sha256 为 64 位十六进制",
+      "failSemantics": "判红：产物没进哈希清单（需求书 §8.6「产物显式」）",
+      "source": "run-read-surface.ps1 D1 的产物半边；contract.md §8.6"
+    },
+    {
+      "id": "evidence-manifest-sha-matches-disk",
+      "target": "<runDir>/manifest.json → /artifacts[i]/sha256 vs 盘上文件",
+      "expr": "逐条实算 sha256 与清单登记值相等",
+      "expect": "全部相等",
+      "failSemantics": "判红：清单哈希与文件不符（清单是死数据或文件被改写）",
+      "source": "read.run 的 missingFiles/sizeMismatch 口径；run-read-surface.ps1 D1"
+    },
+    {
+      "id": "evidence-observation-covers-cameras",
+      "target": "<runDir>/observation.json → /cameras[]",
+      "expr": "用例 cameras 段的每个机位在 observation.cameras[] 里有同名条目",
+      "expect": "逐机位在场",
+      "failSemantics": "判红：观测记录漏记机位（离线无法解释这次观测，A10）",
+      "source": "anchor-checks.ps1::Test-ObservationCameras"
+    },
+    {
+      "id": "evidence-observation-te-reads",
+      "target": "<runDir>/observation.json → /runtimeReads[]",
+      "expr": "用例 te 步声明的族在 runtimeReads 里有 te.<族>[x,y,z].state 条目",
+      "expect": "逐族在场（整合包缺该族时整条跳过，不写假读数）",
+      "failSemantics": "判红：TE 运行期读数没进观测记录（PR-3 运行期轨的离线可解释性失效）",
+      "source": "anchor-checks.ps1::Test-ObservationTeReads"
+    }
+  ],
+  "falsification": {
+    "kind": "synthetic-fixture",
+    "how": "从 run 目录里删掉 evidence.expect 声明的某一个产物 ⇒ evidence-expect-each-present-on-disk 与 evidence-manifest-sha-matches-disk 必须变红",
+    "record": "见 test/criteria/README.md §3"
+  }
+}

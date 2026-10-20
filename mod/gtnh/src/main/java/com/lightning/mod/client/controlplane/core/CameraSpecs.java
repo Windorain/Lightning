@@ -118,7 +118,7 @@ public final class CameraSpecs {
     }
 
     /**
-     * 解析机位级/会话级的光照与渲染模式实际取值（contract.md §4.2.6/§4.2.7）。
+     * 解析机位级/会话级的光照与渲染模式实际取值（contract.md §4.3.6/§4.3.7）。
      *
      * <p>
      * 机位覆盖会话默认；两者都没有则用契约默认（{@code natural} / {@code 本色}）。

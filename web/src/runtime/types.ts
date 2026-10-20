@@ -66,5 +66,21 @@ export interface ViewportSlot {
    * `maskScene` 断言「同格不同部件 ⇒ mask 不同」），也是排障入口。
    */
   outlinePass: SelectionOutlinePass | null
+  /**
+   * 该视口的**呈现会话**（#299 P10e 段②：`BatchedPresenter` 的生产接线）。
+   *
+   * ## 为什么暴露在 `ViewportSlot` 上
+   *
+   * 两个理由，都不是"为了测试方便"：
+   *
+   *  1. **它是视口级资源**（每视口一套 GPU 批次 + 独立设备作用域），
+   *     与 `outlinePass` 同一归属 —— 放别处会让"一个视口有哪些 GPU 资源"
+   *     散在两个地方（释放时漏一处 = A19 泄漏）；
+   *  2. **它是公开观测点**：e2e 需要断言"内核链真的画到了屏幕"
+   *     （逐像素证据），而那要求能从页面里读到这个会话。
+   *
+   * `null` = 该视口尚未装配运行时（组件挂载早于装配）；与 `outlinePass` 同口径。
+   */
+  presenterSurface: import('@/composition/presenterSession').PresenterSession | null
 }
 

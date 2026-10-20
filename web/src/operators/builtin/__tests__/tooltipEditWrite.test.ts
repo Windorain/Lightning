@@ -12,6 +12,8 @@
  */
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { createApp, h, nextTick, ref } from 'vue'
+// #301 P10f D3：`getDoc()` 已终删 ⇒ 替身改用**真 `Context`**（见 `makeOperatorCtx` 的说明）。
+import { makeKernelReadHost } from '@/runtime/__tests__/kernelReadTestHost'
 import { createParserRegistry } from '@/context/parserRegistry'
 import {
   V2PlainParser,
@@ -65,13 +67,23 @@ const rowOf = (y: number) => 2 - 1 - y
 // ---------------------------------------------------------------------------
 
 function makeOperatorCtx(initialDoc: unknown) {
-  let current = initialDoc
+  // ## ⚠️ #301 P10f D3：手工替身换成**真 `Context`**（`makeKernelReadHost`）
+  //
+  // 迁移后的算子读三样东西：`hasLoadedDocument()`（R1 存在性）、
+  // `kernelGrid(0)?.height`（R5 帧高）、以及回落分支的 `frozenDocumentValue()`（R8）。
+  // 手工替身逐个补会造出**第二份**读面语义（本工程三度实测它必然漂移）
+  // ⇒ 用宿主的**生产 `Context`**（`kernel === null` ⇒ 三条读面都走 legacy 分支）。
+  const host = makeKernelReadHost(initialDoc as never)
+  const ctx = Object.assign(host.ctx, {
+    // #301 P10f D0：算子**先**试内核写（`Context.submitContentEdit`）。
+    // 本宿主是**无内核会话**的替身 ⇒ 如实返回 `false`
+    //（生产 `Context.submitContentEdit` 在 `kernel === null` 时正是返回 `false`），
+    // 于是本文件的用例**恰好**覆盖 D0 的**回落分支** —— 那正是 #80 回归锁要守的东西。
+    submitContentEdit: () => false,
+  })
   return {
-    ctx: {
-      getDoc: () => ({ value: current }),
-      main: { replaceDoc: (d: unknown) => { current = d as never } },
-    },
-    current: () => current as {
+    ctx,
+    current: () => host.legacyDocument() as unknown as {
       tooltipPalette?: unknown[]
       cellTooltipGrid?: number[][][]
       serialize: () => Record<string, unknown>
@@ -159,12 +171,16 @@ describe('#80 算子层：缺 tooltipPalette 的文档上写入逐格说明', ()
 // ---------------------------------------------------------------------------
 
 function makePanelCtx(initialDoc: unknown) {
-  const docRef = ref(initialDoc)
+  // #301 P10f D3：与算子层同款 —— 用**真 `Context`**（生产读面），只补两处非读面的位
+  //（`getFrameIndex` 是时间面；`getOperators` 是外壳面）与"无内核会话"的如实回落。
+  const host = makeKernelReadHost(initialDoc as never)
   const frameRef = ref(0)
+  const tickRef = ref(0)
   const items = ref<unknown[]>([])
-  const ctx = {
-    getDoc: () => docRef,
-    getCurrentFrameIndex: () => frameRef,
+  const ctx = Object.assign(host.ctx, {
+    // P10 #261：帧下标改为**只读派生**访问器（旧 `getCurrentFrameIndex(): Ref<number>`
+    // 是可写权威，已删除）。测试替身随之只提供读面。
+    getFrameIndex: () => frameRef.value,
     getSelection: () => ({ items }),
     getOperators: () => ({
       invoke: (id: string, props?: Record<string, unknown>) => {
@@ -174,9 +190,17 @@ function makePanelCtx(initialDoc: unknown) {
         return { status: 'FINISHED' }
       },
     }),
-    main: { replaceDoc: (d: unknown) => { docRef.value = d } },
-  }
-  return { ctx, items }
+    // #301 P10f D0：面板经 `OPERATOR_TOOLTIP_EDIT` 提交，而算子**先**试内核写。
+    // 本宿主**无内核会话** ⇒ 如实返回 `false`（与生产在 `kernel === null` 时一致）
+    // ⇒ 用例覆盖 D0 的**回落分支**（#80 回归锁的本意）。
+    submitContentEdit: () => false,
+    // #301 C′1（N9）：`TooltipEditorPanel` 的重读信号从"文档身份"改为
+    // **内容重读**（宽信号）—— 原地改 tooltip 侧表也要刷新，故替身须提供它。
+    getContentRefreshTick: () => tickRef,
+  })
+  // `host` 一并返回：**测试侧**观测被跟踪的 legacy 文档（`getDoc()` 已终删，
+  // 见 `kernelReadTestHost#legacyDocument` 的说明）。
+  return { ctx, items, host }
 }
 
 function select(items: { value: unknown[] }, pos: { x: number; y: number; z: number }) {
@@ -203,7 +227,7 @@ describe('#80 面板层：缺调色板文档上打字 → 切走 → 切回来�
   async function typeAndSwitch(withPalette: boolean) {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     const res = await parse(bakedDoc(withPalette))
-    const { ctx, items } = makePanelCtx(res.document!)
+    const { ctx, items, host: readHost } = makePanelCtx(res.document!)
 
     select(items, POS_A)
     const { app, host } = mountPanel(ctx)
@@ -226,7 +250,7 @@ describe('#80 面板层：缺调色板文档上打字 → 切走 → 切回来�
     await nextTick()
     const after = textarea(host).value
 
-    const doc = ctx.getDoc().value as unknown as {
+    const doc = readHost.legacyDocument() as unknown as {
       cellTooltipGrid?: number[][][]
       tooltipPalette?: unknown[]
     }

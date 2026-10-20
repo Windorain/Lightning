@@ -1,18 +1,20 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import { renderTooltipHtml } from '@/pure/renderTooltipHtml'
+import ContentText from '@/editors/ContentText.vue'
 
 const props = defineProps<{
   lines: string[]
 }>()
-
-const html = computed(() => props.lines.map(line => renderTooltipHtml(line)).join('\n'))
 </script>
 
 <template>
   <div class="tip-preview">
-    <!-- eslint-disable-next-line vue/no-v-html -->
-    <div class="tip-preview-body" v-html="html" />
+    <!--
+      外部文本经**受控呈现边界**（ContentText → domain/textContent）。
+      旧实现是 `lines.map(renderTooltipHtml).join('\n')` + `v-html`；
+      这里改为逐行走同一解析边界（行间 linebreak），无 `v-html`。
+      （#259 A32 退役项：本文件原为 6 条 `v-html` 直通路径之一。）
+    -->
+    <ContentText class="tip-preview-body" :lines="props.lines" mode="mc" />
   </div>
 </template>
 

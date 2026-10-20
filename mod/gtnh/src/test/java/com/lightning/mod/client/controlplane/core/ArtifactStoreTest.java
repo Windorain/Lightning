@@ -134,6 +134,11 @@ public class ArtifactStoreTest {
             Hashing.sha256HexUtf8("{}"),
             loaded.artifact("criteria.json")
                 .sha256());
+        // 元数据也必须从 manifest 读回：否则「按 caseId 找 run」对重启前的历史 run 全失效
+        // （实测症状见 loadFromDisk 的注释）
+        assertEquals("case-a", loaded.caseId());
+        assertEquals(3L, loaded.jobSeq());
+        assertNotNull("createdAt 也应从 manifest 读回", loaded.createdAt());
     }
 
     @Test

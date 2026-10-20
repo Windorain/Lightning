@@ -1,10 +1,17 @@
 /**
  * 纯函数：由格点、当帧体素体与 tooltipPalette 解析悬停文本。
  * 无 Vue / Three.js / DOM 依赖。
+ *
+ * ## 本文件返回**文本**，不返回 HTML（#259 A32）
+ *
+ * 改动前，本文件的回退分支调用 `renderTooltipHtml(...)` 把宿主 NEI 行转成
+ * **HTML 串**，再由 `ToolTipBox` 的 `v-html` 注入。现在解析统一发生在呈现边界
+ * （`editors/ContentText.vue` → `domain/textContent.ts`）：本文件只负责
+ * "该显示哪段文本"这个**领域**问题，不负责"这段文本能变成什么标记"这个
+ * **呈现/安全**问题。职责分开后，MC 颜色码与 Markdown 的允许规则只有一处。
  */
 
 import { TOOLTIP_GRID_NONE, type StructureDefinition } from '@/render/schema/types'
-import { renderTooltipHtml } from '@/pure/renderTooltipHtml'
 
 // ---- 纯类型定义（无框架依赖） ----
 
@@ -122,6 +129,10 @@ export function resolveViewportTooltipChain(input: ViewportTooltipChainInput): s
   }
 
   // ③ 宿主 NEI 首行回退（既有行为不变）
-  if (hostNeiLines && hostNeiLines.length > 0) return renderTooltipHtml(hostNeiLines[0]!)
+  //
+  // 注意：这里返回**原文**（不是 HTML 串）。改动前是
+  // `renderTooltipHtml(hostNeiLines[0])`，产出 HTML 交 `v-html`；
+  // 现在整条链路上的文本都由呈现边界统一解析（#259 A32）。
+  if (hostNeiLines && hostNeiLines.length > 0) return hostNeiLines[0]!
   return ''
 }

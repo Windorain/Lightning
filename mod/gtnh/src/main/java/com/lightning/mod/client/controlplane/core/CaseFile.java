@@ -152,6 +152,162 @@ public final class CaseFile {
         }
     }
 
+    /**
+     * 读面步骤（v1.3，case-file.md §4.1，issue #98）：{@code read} 段的一项。
+     *
+     * <p>
+     * 语义是「执行读面动作 → 结果 JSON 落 run 目录的 {@code path} → 登记为产物」。
+     * 它是「读面输出可被判据直接引用」（需求书 §10 B2）的载体：判据段随后用
+     * {@code json-field} 的 RFC 6901 指针指到这份产物上。
+     */
+    public static final class ReadStep {
+
+        private final String action;
+        private final JsonObject params;
+        private final String path;
+        private final String role;
+
+        ReadStep(String action, JsonObject params, String path, String role) {
+            this.action = action;
+            this.params = params == null ? new JsonObject() : params;
+            this.path = path;
+            this.role = role;
+        }
+
+        /** 读面动作名（必须是已注册的 {@code read.*} 动作）。 */
+        public String action() {
+            return action;
+        }
+
+        /** 动作参数（原样透传；默认值由动作实现补）。 */
+        public JsonObject params() {
+            return Json.copyObject(params);
+        }
+
+        /** run 目录内相对路径（结果落点，也是判据的 {@code params.path}）。 */
+        public String path() {
+            return path;
+        }
+
+        /** 产物角色标签；未声明时为 {@code null}（运行时按动作名派生）。 */
+        public String role() {
+            return role;
+        }
+
+        /** {@code {action, params, path, role?}}。 */
+        public JsonObject toJson() {
+            JsonObject o = new JsonObject();
+            o.addProperty("action", action);
+            o.add("params", Json.copyObject(params));
+            o.addProperty("path", path);
+            if (role != null) {
+                o.addProperty("role", role);
+            }
+            return o;
+        }
+    }
+
+    /**
+     * 编排步骤（v1.6，case-file.md §3.2）：{@code action} 段的一项。
+     *
+     * <p>
+     * 语义是「<b>执行用例声明的任意 cp 动作</b> → 结果 JSON 落 run 目录的 {@code path} → 登记为产物
+     * →（可选）当场逐步断言」。它是 #96 §4.3「L2 = L0/L1 的<b>有序编排</b>」在代码上的落点：
+     * 没有它，固定程序只能表达 {@code build} 段的四种构建 op，L0（{@code scene.*}）与
+     * L1（{@code player.*}）动作一步也进不了用例，{@code tutorials/} 的教程复现程序无从表达。
+     *
+     * <p>
+     * 与 {@link ReadStep} 的差别只有一条：本步骤的 {@code action} <b>不限前缀</b>——读面段是
+     * 「只读」纪律的静态落点（只许 {@code read.*}），而编排段的本职就是调写动作。因此编排段改用
+     * <b>另一条</b>静态纪律：只许<b>同步</b>动作（步进动作跨 tick，无法在段内推进），
+     * 且不许是收尾原语 {@code core.shutdown}（见 {@code CaseValidator#ACTION_FORBIDDEN}）。
+     */
+    public static final class ActionStep {
+
+        private final String action;
+        private final JsonObject params;
+        private final String path;
+        private final String role;
+        private final JsonObject expect;
+        private final boolean hasExpect;
+        private final JsonElement holdTicks;
+
+        ActionStep(String action, JsonObject params, String path, String role, JsonObject expect, boolean hasExpect,
+            JsonElement holdTicks) {
+            this.action = action;
+            this.params = params == null ? new JsonObject() : params;
+            this.path = path;
+            this.role = role;
+            this.expect = expect;
+            this.hasExpect = hasExpect;
+            this.holdTicks = holdTicks == null || holdTicks.isJsonNull() ? null : holdTicks;
+        }
+
+        /** 动作名（任意已注册的同步动作，{@code read.*} 与 {@code scene.*}/{@code player.*} 都算）。 */
+        public String action() {
+            return action;
+        }
+
+        /** 动作参数（原样透传；默认值由动作实现补）。 */
+        public JsonObject params() {
+            return Json.copyObject(params);
+        }
+
+        /** run 目录内相对路径（结果落点，也是判据的 {@code params.path}）。 */
+        public String path() {
+            return path;
+        }
+
+        /** 产物角色标签；未声明时为 {@code null}（运行时按动作名派生）。 */
+        public String role() {
+            return role;
+        }
+
+        /** 逐步断言（RFC 6901 指针 → 期望值）；未声明时为 null。 */
+        public JsonObject expect() {
+            return expect == null ? null : Json.copyObject(expect);
+        }
+
+        /** 是否声明了逐步断言（区分「未声明」与「声明为空对象」）。 */
+        public boolean hasExpect() {
+            return hasExpect;
+        }
+
+        /**
+         * 步骤对象<b>顶层</b>的 {@code holdTicks}（v1.8 / G1，input-contract.md §9.2 / D-3）；未声明返回 null。
+         *
+         * <p>
+         * 这里是<b>原样承载</b>：本访问器不判类型也不判取值域（那是 {@link CaseValidator} 的事），
+         * 因此非法值也会被原样读出来——调用方必须先过校验，或自行按 {@link CaseValidator} 的口径判。
+         */
+        public JsonElement holdTicks() {
+            return holdTicks == null ? null : Json.copy(holdTicks);
+        }
+
+        /** 是否声明了顶层 {@code holdTicks}（缺失或 JSON null 均为未声明）。 */
+        public boolean hasHoldTicks() {
+            return holdTicks != null;
+        }
+
+        /** {@code {action, params, path, role?, expect?, holdTicks?}}。 */
+        public JsonObject toJson() {
+            JsonObject o = new JsonObject();
+            o.addProperty("action", action);
+            o.add("params", Json.copyObject(params));
+            o.addProperty("path", path);
+            if (role != null) {
+                o.addProperty("role", role);
+            }
+            if (hasExpect) {
+                o.add("expect", Json.copyObject(expect));
+            }
+            if (holdTicks != null) {
+                o.add("holdTicks", Json.copy(holdTicks));
+            }
+            return o;
+        }
+    }
+
     /** 判据条目（case-file.md §5）。 */
     public static final class Criterion {
 
@@ -271,6 +427,9 @@ public final class CaseFile {
     private final String label;
     private final World world;
     private final List<Step> build;
+    private final List<ReadStep> read;
+    private final List<ActionStep> action;
+    private final List<ReadStep> export;
     private final JsonElement capture;
     private final JsonArray cameras;
     private final List<Criterion> criteria;
@@ -279,8 +438,8 @@ public final class CaseFile {
     private final List<String> warnings;
 
     CaseFile(JsonObject raw, String rawText, String schema, String id, String label, World world, List<Step> build,
-        JsonElement capture, JsonArray cameras, List<Criterion> criteria, List<Variant> variants,
-        JsonArray evidenceExpect, List<String> warnings) {
+        List<ReadStep> read, List<ActionStep> action, List<ReadStep> export, JsonElement capture, JsonArray cameras,
+        List<Criterion> criteria, List<Variant> variants, JsonArray evidenceExpect, List<String> warnings) {
         this.raw = raw;
         this.rawText = rawText;
         this.sha256 = Hashing.sha256HexUtf8(rawText);
@@ -289,6 +448,9 @@ public final class CaseFile {
         this.label = label;
         this.world = world;
         this.build = Collections.unmodifiableList(new ArrayList<Step>(build));
+        this.read = Collections.unmodifiableList(new ArrayList<ReadStep>(read));
+        this.action = Collections.unmodifiableList(new ArrayList<ActionStep>(action));
+        this.export = Collections.unmodifiableList(new ArrayList<ReadStep>(export));
         this.capture = capture;
         this.cameras = cameras;
         this.criteria = Collections.unmodifiableList(new ArrayList<Criterion>(criteria));
@@ -335,6 +497,28 @@ public final class CaseFile {
     /** 场景构建步骤（有序）。 */
     public List<Step> build() {
         return build;
+    }
+
+    /** 读面步骤（有序；v1.3 起）。空列表表示用例不产读面产物。 */
+    public List<ReadStep> read() {
+        return read;
+    }
+
+    /** 编排步骤（有序；v1.6 起）。空列表表示用例不编排任何 cp 动作。 */
+    public List<ActionStep> action() {
+        return action;
+    }
+
+    /**
+     * 导出步骤（有序；v1.7 起，Gitea #102）。空列表表示用例不产导出件。
+     *
+     * <p>
+     * 复用 {@link ReadStep} 承载（字段形态一致：{@code action}+{@code params}），但 {@code path}/{@code role}
+     * 恒为 null——导出产物的落点由导出动作自己决定（run 目录的 {@code export/} 下），
+     * 段里不声明落点，避免「声明一个落点而动作写到别处」的自相矛盾。
+     */
+    public List<ReadStep> export() {
+        return export;
     }
 
     /** capture 段原文（PR-1 透传），未声明时为 null。 */

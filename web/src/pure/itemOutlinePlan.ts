@@ -29,7 +29,7 @@
 
 import type { ItemAttributionHit, ItemHitIndex } from '@/pure/itemIndex'
 import { structureRowToWorldY } from '@/pure/vec'
-import { OUTLINE_MASK_LIMIT } from '@/pure/outlineLimits'
+import { OUTLINE_MASK_LIMIT } from '@/presentation/outlineBudget'
 import type { BlockRef, StructureDefinition } from '@/render/schema/types'
 
 export { OUTLINE_MASK_LIMIT }

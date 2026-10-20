@@ -23,7 +23,9 @@ import org.lwjgl.BufferUtils;
 import org.lwjgl.opengl.GL11;
 
 import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonPrimitive;
 import com.lightning.mod.client.controlplane.core.ArtifactStore;
 import com.lightning.mod.client.controlplane.core.CameraSpec;
 import com.lightning.mod.client.controlplane.core.CameraSpecs;
@@ -92,7 +94,7 @@ import com.lightning.mod.client.controlplane.mc.CpLog;
  * <h2>为什么直接调 {@code renderWorld} 而不是等游戏自己渲</h2>
  * 游戏每帧只渲染一次、且相机是玩家。要在<b>同一 tick 内</b>连续拿到 N 个机位 × M 个 tile 的帧，
  * 必须自己驱动渲染。1.7.10 单机里 tick 线程 == 渲染线程，因此这种「自己渲」与游戏自身的渲染
- * 在同一线程上串行，不存在并发改 GL 状态的问题（contract §4.2.5 的线程口径）。
+ * 在同一线程上串行，不存在并发改 GL 状态的问题（contract §4.3.5 的线程口径）。
  *
  * <h2>ScreenShotHelper 的三个已知坑（逐条规避）</h2>
  * <ul>
@@ -140,7 +142,16 @@ import com.lightning.mod.client.controlplane.mc.CpLog;
  * <h2>禁止视口拼接</h2>
  * tile 全部靠 {@link ProjectionOverride} 的投影偏移实现，<b>从不</b>移动 GL 视口：
  * {@code EntityRenderer.renderWorld} 每帧强制 {@code glViewport(0,0,displayWidth,displayHeight)}，
- * 视口拼接会被它改回去，接缝必然错位（contract §4.2.4 明令禁止）。
+ * 视口拼接会被它改回去，接缝必然错位（contract §4.3.4 明令禁止）。
+ *
+ * <h2>GUI 取证的默认行为（为什么必须是 opt-in）</h2>
+ * 本执行器<b>默认</b>只画世界（{@code gui=none}）：不读 {@code mc.currentScreen}、不改
+ * {@code GuiScreen.width/height}、不发 {@code DrawScreenEvent}、meta 与结果里不多一个键
+ * ⇒ 既有 {@code shot.multi} 调用的产物与 A3 基准逐字节可比。
+ * 传 {@code gui="screen"} 才走 {@link #captureScreen}（真 {@code currentScreen} 由游戏自己画入本帧，
+ * 含 {@code DrawScreenEvent.Pre/Post}），此时 meta/结果新增 {@code guiCapture} 与
+ * {@code guiHidden=false} —— <b>这是刻意的</b>：授权了 GUI 取证却仍报 {@code guiHidden=true}
+ * 会让「画面里到底有没有界面」不可判。新增字段对旧哈希/判据的影响见 {@link ShotMultiAction} 的类注释。
  */
 public final class ShotExecutor {
 
@@ -155,6 +166,15 @@ public final class ShotExecutor {
 
     /** 渲染故障时的重试上限（每机位每 tile 一次机会）。 */
     private static final int MAX_ATTEMPTS = 2;
+
+    /** {@code gui} 参数取值：不拍 GUI（默认；既有 A3 基准的可比路径）。 */
+    public static final String GUI_NONE = "none";
+
+    /** {@code gui} 参数取值：把真实 {@code currentScreen} 画进这一帧（真 GUI 取证）。 */
+    public static final String GUI_SCREEN = "screen";
+
+    /** {@code gui} 参数取值域（越域即 {@code CP-VALID-002}）。 */
+    private static final String[] GUI_MODES = { GUI_NONE, GUI_SCREEN };
 
     /** {@code GL_FRAMEBUFFER_BINDING}（EXT 与核心同值 0x8CA6）：当前绑定的 framebuffer 名。 */
     private static final int GL_FRAMEBUFFER_BINDING = 0x8CA6;
@@ -188,6 +208,16 @@ public final class ShotExecutor {
 
         /** 逐机位进度回调（可为 null）。 */
         public Progress progress;
+
+        /**
+         * GUI 取证模式：{@link #GUI_NONE}（默认，保持既有行为逐字节可比）或 {@link #GUI_SCREEN}。
+         *
+         * <p>
+         * 默认值就是 {@code none}：{@code null} 与 {@code none} 同义。既有 {@code shot.multi} 调用方
+         * 不传新参数 ⇒ 走原路径（不读 {@code currentScreen}、{@code hideGUI=true}、meta 里
+         * {@code guiHidden=true}），A3 基准不受影响。
+         */
+        public String guiCapture;
     }
 
     /** 进度回调（0..1 与说明）。 */
@@ -225,12 +255,20 @@ public final class ShotExecutor {
          * 那时 {@link ProjectionOverride#disarm()} 已经执行，现场去问只会拿到 {@code none}。
          */
         private String projectionApplied = "none";
+        /**
+         * 本机位拍摄时刻的 GUI 消费链读数（{@code gui=screen} 时逐片留痕，见
+         * {@link #captureScreen}）；空数组 = 本次未启用 GUI 取证。
+         */
+        private final JsonArray guiCaptureJson = new JsonArray();
+        /** 本次拍摄是否请求了 GUI 取证（{@code gui=screen}）；决定 meta 的 {@code guiHidden} 取值。 */
+        private final boolean guiCaptureRequested;
         private final JsonObject result = new JsonObject();
 
-        CameraRun(CameraSpec spec, int baseW, int baseH) {
+        CameraRun(CameraSpec spec, int baseW, int baseH, boolean guiCaptureRequested) {
             this.spec = spec;
             this.plan = TilePlan.of(spec.width(), spec.height(), spec.tileCols(), spec.tileRows(), baseW, baseH);
             this.tiles = new BufferedImage[plan.rows()][plan.cols()];
+            this.guiCaptureRequested = guiCaptureRequested;
         }
     }
 
@@ -275,6 +313,11 @@ public final class ShotExecutor {
 
     /** 渲染目标自证日志是否已输出（一次拍摄只输出一次，见 {@link FrameScope#probeRenderTarget}）。 */
     private boolean renderTargetProbed;
+
+    /**
+     * 「界面绘制自证」是否已经输出过（每次执行器只打一条，见 {@link #captureScreen}）。
+     */
+    private boolean guiDrawProbed;
 
     private VirtualCamera camera;
 
@@ -356,7 +399,7 @@ public final class ShotExecutor {
         settingsSaved = false;
         camera = new VirtualCamera(mc.theWorld);
         for (CameraSpec spec : in.cameras) {
-            runs.add(new CameraRun(spec, baseWidth, baseHeight));
+            runs.add(new CameraRun(spec, baseWidth, baseHeight, GUI_SCREEN.equals(guiMode())));
         }
         ensureRunShotsDir();
         CpLog.info(
@@ -483,7 +526,7 @@ public final class ShotExecutor {
         String renderMode = CameraSpecs.resolveRenderMode(spec, in.capture);
         String lighting = CameraSpecs.resolveLighting(spec, in.capture);
         if (CaptureSpec.RENDER_MODE_LIT.equals(renderMode) || CaptureSpec.LIGHTING_NEUTRAL_FLAT.equals(lighting)) {
-            // contract §4.2.6 的「参与光照 / 中性光照」在本版是如实留痕的<b>观测档位</b>：
+            // contract §4.3.6 的「参与光照 / 中性光照」在本版是如实留痕的<b>观测档位</b>：
             // 世界光照管线本身不做替换（v1 未引入光照注入渲染通道），逐图 meta 与
             // observation.runtimeReads 都会标注 lightingApplied=false，避免事后把
             // 「标注了参与光照」误读成「画面真的被打了中性光」。
@@ -493,6 +536,11 @@ public final class ShotExecutor {
         FrameScope scope = new FrameScope();
         try {
             scope.arm(spec, plan, bufW, bufH, col, row, run);
+            if (GUI_SCREEN.equals(guiMode())) {
+                // 真 GUI 取证（opt-in）：在 renderWorld 之后、读回之前，让<b>游戏自己</b>把
+                // currentScreen 画进同一个 framebuffer。不合成、不伪造控件（见 captureScreen 注释）。
+                captureScreen(run, bufW, bufH);
+            }
             File produced = shoot(bufW, bufH, spec, plan, col, row);
             BufferedImage image = ImageIO.read(produced);
             if (image == null) {
@@ -511,6 +559,409 @@ public final class ShotExecutor {
         } finally {
             scope.close();
         }
+    }
+
+    /**
+     * 读整帧 RGBA（当前绑定的读目标，左下原点）；失败返回 {@code null}（探针不改变渲染结果）。
+     */
+    private static byte[] readFrameRgba(int w, int h) {
+        try {
+            int width = Math.max(1, w);
+            int height = Math.max(1, h);
+            ByteBuffer buf = BufferUtils.createByteBuffer(width * height * 4);
+            GL11.glPixelStorei(GL11.GL_PACK_ALIGNMENT, 1);
+            GL11.glReadPixels(0, 0, width, height, GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE, buf);
+            byte[] out = new byte[width * height * 4];
+            buf.get(out);
+            return out;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /**
+     * 帧指纹（FNV-1a 64 位）。
+     *
+     * <p>
+     * 刻意不用 {@code MessageDigest}：本探针只需要「两次读回是否逐字节相同」这一个判断，
+     * 用不依赖 JCA provider 的确定性散列更省事，且失败面更小（加密散列在取证链里的位置见
+     * {@code ArtifactStore} 的 sha256，那是产物清单的职责，不是这里的）。
+     */
+    private static String frameHash(byte[] rgba) {
+        if (rgba == null) {
+            return "n/a";
+        }
+        long h = 0xcbf29ce484222325L;
+        for (byte b : rgba) {
+            h ^= (b & 0xFFL);
+            h *= 0x100000001b3L;
+        }
+        String hex = Long.toHexString(h);
+        StringBuilder sb = new StringBuilder();
+        for (int i = hex.length(); i < 16; i++) {
+            sb.append('0');
+        }
+        return sb.append(hex)
+            .toString();
+    }
+
+    /** 两次读回之间有多少像素不同；无法比较（任一为 null 或尺寸不同）返回 -1。 */
+    private static int countChangedPixels(byte[] a, byte[] b) {
+        if (a == null || b == null || a.length != b.length) {
+            return -1;
+        }
+        int n = 0;
+        for (int i = 0; i + 3 < a.length; i += 4) {
+            if (a[i] != b[i] || a[i + 1] != b[i + 1] || a[i + 2] != b[i + 2] || a[i + 3] != b[i + 3]) {
+                n++;
+            }
+        }
+        return n;
+    }
+
+    /** 读一个像素（当前绑定读目标；左下原点），返回 {@code #AARRGGBB}；失败返回 {@code n/a}。 */
+    private static String readPixelHex(int x, int y) {
+        try {
+            ByteBuffer pixel = BufferUtils.createByteBuffer(4);
+            GL11.glPixelStorei(GL11.GL_PACK_ALIGNMENT, 1);
+            GL11.glReadPixels(x, y, 1, 1, GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE, pixel);
+            int r = pixel.get(0) & 0xFF;
+            int g = pixel.get(1) & 0xFF;
+            int b = pixel.get(2) & 0xFF;
+            int a = pixel.get(3) & 0xFF;
+            int argb = (a << 24) | (r << 16) | (g << 8) | b;
+            String hex = Integer.toHexString(argb);
+            StringBuilder sb = new StringBuilder("#");
+            for (int i = hex.length(); i < 8; i++) {
+                sb.append('0');
+            }
+            return sb.append(hex)
+                .toString();
+        } catch (Throwable t) {
+            return "n/a";
+        }
+    }
+
+    /** 一个 GL 能力开关的文本（{@code on/off}）。 */
+    private static String glBool(int cap) {
+        try {
+            return GL11.glGetBoolean(cap) ? "on" : "off";
+        } catch (Throwable t) {
+            return "?";
+        }
+    }
+
+    /**
+     * GL 状态快照：只取与「手工驱动渲染后还能不能把东西画进本 framebuffer」直接相关的那几项。
+     *
+     * <p>
+     * 这组状态是「界面画了但画面里没有」这类事故的分界点：{@code colorMask=0000}、空的
+     * {@code scissorBox}、恒失败的模板测试、或绘制期被换掉的 {@code binding}，都会让
+     * {@code drawScreen} 正常返回、GL 不报错、而像素一个都不改。
+     */
+    private static String glStateSnapshot() {
+        try {
+            int binding = GL11.glGetInteger(GL_FRAMEBUFFER_BINDING);
+            IntBuffer vp = BufferUtils.createIntBuffer(4);
+            GL11.glGetInteger(GL11.GL_VIEWPORT, vp);
+            ByteBuffer mask = BufferUtils.createByteBuffer(4);
+            GL11.glGetBoolean(GL11.GL_COLOR_WRITEMASK, mask);
+            IntBuffer sbox = BufferUtils.createIntBuffer(4);
+            GL11.glGetInteger(GL11.GL_SCISSOR_BOX, sbox);
+            // glGetError 会清标志，故放在最后读
+            int err = GL11.glGetError();
+            return "binding=" + binding
+                + " viewport=["
+                + vp.get(0)
+                + ","
+                + vp.get(1)
+                + ","
+                + vp.get(2)
+                + ","
+                + vp.get(3)
+                + "] colorMask="
+                + (mask.get(0) & 1)
+                + (mask.get(1) & 1)
+                + (mask.get(2) & 1)
+                + (mask.get(3) & 1)
+                + " scissorTest="
+                + glBool(GL11.GL_SCISSOR_TEST)
+                + " scissorBox=["
+                + sbox.get(0)
+                + ","
+                + sbox.get(1)
+                + ","
+                + sbox.get(2)
+                + ","
+                + sbox.get(3)
+                + "] depthTest="
+                + glBool(GL11.GL_DEPTH_TEST)
+                + " depthMask="
+                + glBool(GL11.GL_DEPTH_WRITEMASK)
+                + " blend="
+                + glBool(GL11.GL_BLEND)
+                + " alphaTest="
+                + glBool(GL11.GL_ALPHA_TEST)
+                + " stencilTest="
+                + glBool(GL11.GL_STENCIL_TEST)
+                + " cullFace="
+                + glBool(GL11.GL_CULL_FACE)
+                + " lighting="
+                + glBool(GL11.GL_LIGHTING)
+                + " tex2d="
+                + glBool(GL11.GL_TEXTURE_2D)
+                + " glError="
+                + err;
+        } catch (Throwable t) {
+            return "n/a (" + t + ")";
+        }
+    }
+
+    /**
+     * 界面绘制自证：把「让游戏画 {@code currentScreen} 这一步到底有没有改到本帧像素」写进产物与日志。
+     *
+     * <h2>为什么需要它（#205 事故）</h2>
+     * 真机实测出现过这样一组产物：同一个机位、同一时刻，{@code gui:"screen"} 与 {@code gui:"none"}
+     * 两次拍摄的 PNG <b>逐字节相同</b>（sha256 一致、53514 字节），而 meta 里 {@code drawn=true}、
+     * {@code screen=GuiContainerCreative}、{@code DrawScreenEvent.Pre} 未被 cancel、无异常记录——
+     * 也就是说「界面被画了」这句自述在像素层面完全不成立，而全链路判据（尺寸/片数/命名/哈希/无异常）
+     * 照样全绿。r4 纯黑事故的教训是「渲染黑与读回黑不可区分」，这里是同一类失效模式的另一面：
+     * <b>「调用返回正常」与「像素确实改了」不可区分</b>。
+     *
+     * <p>
+     * 本探针把分界点直接写下来：绘制前/后的<b>整帧指纹</b>与<b>改动像素数</b>、两端的 GL 状态快照
+     * （绑定、colorMask、scissor、深度、模板…）、以及未被绑定的<b>窗口 framebuffer</b> 中心像素
+     * （用于区分「画去了窗口」与「压根没画进去」）。这些字段进 meta 的 {@code guiCapture[]}，
+     * 因此「画面里到底有没有界面」第一次有了可复核的机读证据，而不是只看 {@code drawn} 这一个布尔。
+     *
+     * <p>
+     * 采样不写 GL 状态（只重置一次 {@code GL_PACK_ALIGNMENT}，{@code ScreenShotHelper} 自己也会设），
+     * 故不改变渲染结果；失败的探针只记 {@code n/a}，绝不把拍摄判失败。
+     */
+    private void appendGuiDrawProbe(JsonObject rec, String cameraName, int bufW, int bufH, byte[] frameBefore,
+        String stateBefore) {
+        try {
+            byte[] frameAfter = readFrameRgba(bufW, bufH);
+            int total = bufW * bufH;
+            int changed = countChangedPixels(frameBefore, frameAfter);
+            rec.addProperty("frameHashBefore", frameHash(frameBefore));
+            rec.addProperty("frameHashAfter", frameHash(frameAfter));
+            rec.addProperty("changedPixels", Integer.valueOf(changed));
+            rec.addProperty(
+                "changedRatioPct",
+                Double.valueOf(changed < 0 || total <= 0 ? -1.0d : (changed * 100.0d) / total));
+            rec.addProperty("glStateBefore", stateBefore);
+            rec.addProperty("glStateAfter", glStateSnapshot());
+            // 「画去哪了」的另一半：窗口 framebuffer 的中心像素。绑 0 → 采样 → 绑回，两侧都在 finally 里复位。
+            String windowPixel = "n/a";
+            Framebuffer fb = in.mc == null ? null : in.mc.getFramebuffer();
+            if (fb != null) {
+                try {
+                    fb.unbindFramebuffer();
+                    windowPixel = readPixelHex(bufW / 2, bufH / 2);
+                } finally {
+                    fb.bindFramebuffer(false);
+                }
+            }
+            rec.addProperty("windowFramebufferCenterPixel", windowPixel);
+            if (!guiDrawProbed) {
+                guiDrawProbed = true;
+                CpLog.info(
+                    "界面绘制自证（一次性，机位 %s）：帧指纹 %s → %s，改动像素 %d/%d（%.4f%%）" + " | 窗口 framebuffer 中心像素=%s | 绘制前：%s | 绘制后：%s",
+                    cameraName,
+                    frameHash(frameBefore),
+                    frameHash(frameAfter),
+                    Integer.valueOf(changed),
+                    Integer.valueOf(total),
+                    Double.valueOf(changed < 0 || total <= 0 ? -1.0d : (changed * 100.0d) / total),
+                    windowPixel,
+                    stateBefore,
+                    glStateSnapshot());
+            }
+            if (changed == 0) {
+                warnOnce(
+                    "gui=screen 的界面绘制没有改变本帧任何一个像素（改动像素 0）⇒ 该帧不能作为「画面里有界面」的证据；"
+                        + "逐字段自证见 meta 的 guiCapture[]，根因口径见 Gitea #205");
+            }
+        } catch (Throwable t) {
+            CpLog.warn("界面绘制自证探针失败（不影响拍摄）: %s", String.valueOf(t));
+        }
+    }
+
+    /**
+     * 真 GUI 取证：把 {@code mc.currentScreen} 让<b>游戏自己</b>画进当前 framebuffer（opt-in）。
+     *
+     * <h2>为什么这样写（对齐原版渲染路径）</h2>
+     * 原版 {@code EntityRenderer.updateCameraAndRender} 的顺序是
+     * {@code renderWorld} → HUD（{@code ingameGUI.renderGameOverlay}）→
+     * {@code DrawScreenEvent.Pre} → {@code currentScreen.drawScreen(k, l, partialTicks)} →
+     * {@code DrawScreenEvent.Post}（反编译源 {@code EntityRenderer.java:1091-1138}），其中
+     * {@code k = Mouse.getX() * scaledWidth / displayWidth}、
+     * {@code l = scaledHeight - Mouse.getY() * scaledHeight / displayHeight - 1}（同文件 {@code :1077-1078}）。
+     * 本方法<b>逐条照抄</b>那一小段（含两个事件），因为 MUI2 的输入/绘制链挂在
+     * {@code DrawScreenEvent.Pre} 上（它自己把事件 cancel 掉再画），少发一个事件就等于绕过它。
+     *
+     * <p>
+     * 明确<b>不做</b>的事：不 {@code displayGuiScreen}、不调 {@code setWorldAndResolution}、
+     * 不反射调任何控件的 {@code onMousePressed}/{@code draw}、不合成任何按钮像素。画面里出现的
+     * 一定是「游戏在那一刻本来会画的东西」。
+     *
+     * <h2>为什么按帧缩放临时改写 {@code GuiScreen.width/height}</h2>
+     * 分片拍摄会把 framebuffer 覆写成单片尺寸（如 960×540），而界面持有的是窗口尺寸下的
+     * {@code width/height}（如 854×480）。原版在窗口变化时靠 {@code Minecraft.resize()} →
+     * {@code setWorldAndResolution} 重建界面，但那会调每个控件的 {@code initGui} —— 在取证帧里
+     * 重建界面既慢又会改控件状态（属于「替游戏做决定」）。故只把两个<b>尺寸字段</b>临时改成与本帧
+     * framebuffer 自洽的值（在 try/finally 里还原），控件自身状态一律不动。
+     * 这一处副作用（改两个 public int 字段一帧）写进 {@code guiCaptureJson.notes} 供调用方判读。
+     *
+     * <h2>为什么不开 HUD</h2>
+     * {@code ingameGUI.renderGameOverlay} 是<b>另一个</b>可选面（HUD/聊天/十字准星）。本版只做
+     * {@code currentScreen}（真界面），HUD 面留作后续增量：默认路径 {@code hideGUI=true} 保持
+     * 既有行为不变，开 HUD 会让「世界本体」之外的像素来源多一条，判据要先想清楚再开。
+     */
+    private void captureScreen(CameraRun run, int bufW, int bufH) {
+        Minecraft mc = in.mc;
+        JsonObject rec = new JsonObject();
+        rec.addProperty("mode", GUI_SCREEN);
+        rec.addProperty("tileBuffer", bufW + "x" + bufH);
+        net.minecraft.client.gui.GuiScreen screen = mc.currentScreen;
+        if (screen == null) {
+            rec.addProperty("screen", (String) null);
+            rec.addProperty("drawn", Boolean.FALSE);
+            rec.addProperty("note", "拍摄时刻 mc.currentScreen 为 null ⇒ 本帧没有可画的界面（这是如实读数，不是失败）");
+            run.guiCaptureJson.add(rec);
+            warnOnce("gui=screen 但拍摄时刻 currentScreen 为 null：本帧未画任何界面（shots/*.png 仍是纯世界）");
+            return;
+        }
+        rec.addProperty(
+            "screen",
+            screen.getClass()
+                .getName());
+        rec.addProperty("allowUserInput", Boolean.valueOf(screen.allowUserInput));
+        int savedWidth = screen.width;
+        int savedHeight = screen.height;
+        boolean sizeRewritten = false;
+        try {
+            // 【#205 根因修法】与游戏自身同源：GUI/HUD 的**正交投影**由 setupOverlayRendering() 建立。
+            // 游戏在 renderWorld 之后先画 HUD（GuiIngame.renderGameOverlay 开头就调它）、再画界面；
+            // 本执行器按设计跳过 HUD（见方法注释「为什么不开 HUD」）⇒ 这一步必须自己补上。
+            // 缺它时 drawScreen 发出的几何落在**相机投影**下、整段被视锥裁掉：调用正常返回、
+            // GL 状态前后完全一致、glGetError=0、像素零改动——实测 changedPixels=0、帧指纹前后相同
+            // （自证探针见 appendGuiDrawProbe；现场数据与根因口径见 Gitea #205）。
+            in.mc.entityRenderer.setupOverlayRendering();
+            // 界面尺寸吃的是**缩放后**尺寸（ScaledResolution），不是 framebuffer 像素尺寸：
+            // 原实现把 buffer 尺寸写进 screen.width/height，与上面同属「把像素尺寸当界面尺寸」的口径错。
+            net.minecraft.client.gui.ScaledResolution sr = new net.minecraft.client.gui.ScaledResolution(
+                in.mc,
+                Math.max(1, bufW),
+                Math.max(1, bufH));
+            int sw = Math.max(1, sr.getScaledWidth());
+            int sh = Math.max(1, sr.getScaledHeight());
+            screen.width = sw;
+            screen.height = sh;
+            sizeRewritten = true;
+            // 缩放鼠标坐标：与 EntityRenderer.java:1077-1078 同式。
+            // 【实测】Mouse.getX/getY 是 SDL 窗口空间（原点左下）口径——lwjgl3ify 的
+            // Mouse.addMoveEvent 里 `latestY = Display.getHeight() - sdlY`，getY() 与 getEventY()
+            // 都是这一支；原版那两个式子吃的就是这个口径，故此处<b>照抄</b>而不是自己再折一次。
+            int mouseX = readMouseDisplayX();
+            int mouseY = readMouseDisplayY();
+            int guiMouseX = mouseX < 0 ? 0 : mouseX * sw / Math.max(1, bufW);
+            int guiMouseY = mouseY < 0 ? 0 : sh - mouseY * sh / Math.max(1, bufH) - 1;
+            JsonObject mouse = new JsonObject();
+            mouse.addProperty("displayX", mouseX);
+            mouse.addProperty("displayY", mouseY);
+            mouse.addProperty("mouseSpace", "sdl-window（Mouse.getX/getY 的实测口径）");
+            mouse.addProperty("guiX", guiMouseX);
+            mouse.addProperty("guiY", guiMouseY);
+            mouse.addProperty("source", "Mouse.getX/getY（渲染帧口径，与 EntityRenderer.java:1077-1078 同源；命中集读的是同一路）");
+            rec.add("mouse", mouse);
+            rec.addProperty("partialTicks", Double.valueOf(partialTicks()));
+            // 界面绘制自证（#205）：绘制前取整帧指纹与 GL 状态，绘制后再取一次并在 meta 里给出改动像素数
+            byte[] frameBefore = readFrameRgba(bufW, bufH);
+            String stateBefore = glStateSnapshot();
+            boolean canceled = false;
+            net.minecraftforge.client.event.GuiScreenEvent.DrawScreenEvent.Pre pre = new net.minecraftforge.client.event.GuiScreenEvent.DrawScreenEvent.Pre(
+                screen,
+                guiMouseX,
+                guiMouseY,
+                partialTicks());
+            // 1.7.10 的 MinecraftForge.EVENT_BUS.post 返回 void（不可用返回值判 cancel）；
+            // 与原版 EntityRenderer.java:1136 同一条口径：post 之后读 event.isCanceled()。
+            net.minecraftforge.common.MinecraftForge.EVENT_BUS.post(pre);
+            canceled = pre.isCanceled();
+            if (!canceled) {
+                screen.drawScreen(guiMouseX, guiMouseY, partialTicks());
+            } else {
+                rec.addProperty("drawScreenSkipped", Boolean.TRUE);
+                rec.addProperty(
+                    "drawScreenSkippedNote",
+                    "DrawScreenEvent.Pre 被 cancel（模组 GUI 自绘路径，如 MUI2）⇒ 由该监听者完成本帧绘制");
+            }
+            net.minecraftforge.common.MinecraftForge.EVENT_BUS.post(
+                new net.minecraftforge.client.event.GuiScreenEvent.DrawScreenEvent.Post(
+                    screen,
+                    guiMouseX,
+                    guiMouseY,
+                    partialTicks()));
+            rec.addProperty("drawn", Boolean.TRUE);
+            appendGuiDrawProbe(rec, run.spec.name(), bufW, bufH, frameBefore, stateBefore);
+        } catch (Throwable t) {
+            rec.addProperty("drawn", Boolean.FALSE);
+            rec.addProperty("error", describe(t));
+            warnOnce("gui=screen 绘制界面失败（本帧仍是纯世界图）: " + describe(t));
+        } finally {
+            if (sizeRewritten) {
+                screen.width = savedWidth;
+                screen.height = savedHeight;
+            }
+        }
+        if (sizeRewritten) {
+            rec.addProperty(
+                "notes",
+                "本帧用 setupOverlayRendering() 建立界面正交投影，并把 screen.width/height 临时改为本片 framebuffer 的**缩放后**尺寸（ScaledResolution 口径）以自洽，已在 finally 还原；"
+                    + "控件自身状态未改动");
+        }
+        run.guiCaptureJson.add(rec);
+    }
+
+    /** 解析后的 GUI 取证模式（{@code null} ⇒ 默认 {@link #GUI_NONE}）。 */
+    private String guiMode() {
+        String v = in.guiCapture;
+        return v == null || v.isEmpty() ? GUI_NONE : v;
+    }
+
+    /** 实读 {@code Mouse.getX()}；读不到返回 -1（调用方据此落 0 并在留痕里说明）。 */
+    private static int readMouseDisplayX() {
+        return readMouseAxis("getX");
+    }
+
+    /** 实读 {@code Mouse.getY()}。 */
+    private static int readMouseDisplayY() {
+        return readMouseAxis("getY");
+    }
+
+    /**
+     * 反射读一个 {@code Mouse} 轴。
+     *
+     * <p>
+     * 走反射而非静态引用：lwjgl3ify 的 {@code -api} 制品不含 {@code org.lwjglx.**}，而
+     * {@code Class.forName} 的字符串字面量不被 RFB 重映射（契约 §1.2 的编译可见性讨论）。
+     */
+    private static int readMouseAxis(String method) {
+        for (String cn : new String[] { "org.lwjglx.input.Mouse", "org.lwjgl.input.Mouse" }) {
+            try {
+                Class<?> c = Class.forName(cn, false, ShotExecutor.class.getClassLoader());
+                Object v = c.getMethod(method)
+                    .invoke(null);
+                if (v instanceof Number) {
+                    return ((Number) v).intValue();
+                }
+            } catch (Throwable t) {
+                // 试下一个候选
+            }
+        }
+        return -1;
     }
 
     /**
@@ -842,8 +1293,15 @@ public final class ShotExecutor {
         // 第一人称手持物/选择框在本帧被 hideGUI 挡掉（见 renderAndRead）：画面里不该有第一人称持物，
         // 否则「本色」取证图会被道具模型占掉一角。注意这是**另一条**路径：第三人称玩家模型手里的东西
         // 由 MixinRendererLivingEntityShot 取消整段 doRender 来解决（见类注释「拍摄帧内隐藏玩家」）。
-        r.addProperty("guiHidden", Boolean.TRUE);
+        //
+        // gui=screen（opt-in 的真 GUI 取证）时 HUD 级渲染仍被挡掉，但 currentScreen 自己会画进本帧
+        // （见 captureScreen）⇒ 该字段的语义从「画面里没有 GUI」收窄成「画面里没有 HUD」，
+        // 故如实写 false，并用 guiCapture 逐片给出实际画了什么。
+        r.addProperty("guiHidden", Boolean.valueOf(!run.guiCaptureRequested));
         r.addProperty("worldTime", in.mc.theWorld == null ? -1L : in.mc.theWorld.getWorldTime());
+        if (run.guiCaptureRequested && run.guiCaptureJson.size() > 0) {
+            r.add("guiCapture", Json.copyArray(run.guiCaptureJson));
+        }
         r.addProperty("tile", Boolean.valueOf(plan.tiled()));
         r.addProperty("tileCols", plan.cols());
         r.addProperty("tileRows", plan.rows());
@@ -881,7 +1339,12 @@ public final class ShotExecutor {
             // 原版第一人称相机固有的 0.1 格常量不随声明变化，故不进这个字段
             meta.add("effectiveEyePos", vec3(spec.pos()));
             meta.addProperty("playerHidden", Boolean.valueOf(run.playerHidden));
-            meta.addProperty("guiHidden", Boolean.TRUE);
+            meta.addProperty("guiHidden", Boolean.valueOf(!run.guiCaptureRequested));
+            if (run.guiCaptureRequested && run.guiCaptureJson.size() > 0) {
+                // 真 GUI 取证的逐片读数（消费链 + 缩放 + 鼠标回读）；默认路径下本键不出现，
+                // 故既有 shot-meta 的形状在 gui=none 时逐字节不变（见类注释「GUI 取证的默认行为」）。
+                meta.add("guiCapture", Json.copyArray(run.guiCaptureJson));
+            }
             meta.addProperty("renderMode", Json.optString(r, "renderMode", null));
             meta.addProperty("lighting", Json.optString(r, "lighting", null));
             meta.addProperty("lightingApplied", Boolean.FALSE);
@@ -1058,6 +1521,7 @@ public final class ShotExecutor {
         }
         o.addProperty("baseDisplayWidth", baseWidth);
         o.addProperty("baseDisplayHeight", baseHeight);
+        o.addProperty("guiCapture", guiMode());
         o.addProperty("settingsRestored", Boolean.valueOf(settingsSaved));
         o.addProperty("elapsedMs", Long.valueOf(System.currentTimeMillis() - startedAtMs));
         if (warnings.size() > 0) {
@@ -1254,6 +1718,79 @@ public final class ShotExecutor {
     /** 契约版本（结果留痕）。 */
     public static String contractVersion() {
         return Contract.VERSION;
+    }
+
+    /**
+     * 校验并归一化 {@code gui} 参数（唯一的取值域判定点；越域即 {@code CP-VALID-002}）。
+     *
+     * <p>
+     * 缺省（{@code null} / {@link com.google.gson.JsonNull} / 空串）归一成 {@link #GUI_NONE}。
+     * 不适用/未知取值一律显式拒绝——「静默忽略不适用字段」是本仓已定的失效模式。
+     *
+     * <h2>为什么必须显式处理 {@link JsonElement}（实机缺陷修复，Gitea #165 / #164）</h2>
+     * 生产调用路径传进来的是 {@code Json.get(params, "gui")} 的**返回值**，即 gson 的
+     * {@link JsonPrimitive}，而<b>不是</b> {@code String}。原实现直接
+     * {@code String.valueOf(raw)}：对 {@code JsonPrimitive("screen")} 得到的是它的
+     * <b>JSON 表示</b>{@code "\"screen\""}（带引号）⇒ 永远落在取值域外 ⇒
+     * <b>{@code gui:"screen"} 从来就不可能被接受</b>（离线测试只喂 {@code String}，因此全绿；
+     * 这正是「测试全绿但能力不可用」的形态，由实机验收判据 W7b 擒获）。
+     *
+     * <p>
+     * 修法：显式按类型解包，并且**拒绝非字符串标量**（数字/布尔不许静默强转成字符串——
+     * {@code contract.md} §2.1 的「类型即判据，不做隐式转换」）。非标量（对象/数组）同样显式拒绝。
+     *
+     * @param raw 原始参数值（可为 {@code null}；{@code String} 与 {@link JsonElement} 两种形态都接受）
+     * @return {@link #GUI_NONE} 或 {@link #GUI_SCREEN}
+     * @throws CpException CP-VALID-002：取值域外、类型不符（非标量/非字符串）
+     */
+    public static String resolveGuiMode(Object raw) {
+        if (raw == null) {
+            return GUI_NONE;
+        }
+        String v;
+        if (raw instanceof JsonElement) {
+            JsonElement e = (JsonElement) raw;
+            if (e.isJsonNull()) {
+                return GUI_NONE;
+            }
+            if (!e.isJsonPrimitive()) {
+                throw CpException.param(
+                    "参数取值非法: gui",
+                    "gui",
+                    "gui 只接受字符串；收到 " + (e.isJsonObject() ? "对象" : "数组") + "（只许 " + guiChoices() + "）");
+            }
+            JsonPrimitive p = e.getAsJsonPrimitive();
+            if (!p.isString()) {
+                throw CpException
+                    .param("参数取值非法: gui", "gui", "gui 只接受字符串；收到非字符串标量 " + p + "（本仓禁止静默强转，见 contract.md §2.1）");
+            }
+            v = p.getAsString()
+                .trim();
+        } else {
+            v = String.valueOf(raw)
+                .trim();
+        }
+        if (v.isEmpty()) {
+            return GUI_NONE;
+        }
+        for (String m : GUI_MODES) {
+            if (m.equals(v)) {
+                return m;
+            }
+        }
+        throw CpException.param("参数取值非法: gui", "gui", "只许 " + guiChoices() + "（收到 \"" + v + "\"）");
+    }
+
+    /** {@code gui} 的取值域（人读形式，供拒绝消息用）。 */
+    private static String guiChoices() {
+        StringBuilder sb = new StringBuilder();
+        for (String m : GUI_MODES) {
+            if (sb.length() > 0) {
+                sb.append('|');
+            }
+            sb.append(m);
+        }
+        return sb.toString();
     }
 
     /** 供诊断：当前 shots 目录（未关联 run 时返回 null）。 */

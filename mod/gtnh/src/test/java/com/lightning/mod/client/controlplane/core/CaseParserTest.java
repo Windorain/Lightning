@@ -3,6 +3,7 @@ package com.lightning.mod.client.controlplane.core;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -455,11 +456,17 @@ public class CaseParserTest {
             plan.get("caseSha256")
                 .getAsString());
         assertEquals(
-            6,
+            CaseValidator.SEGMENTS.size(),
             plan.getAsJsonArray("segments")
                 .size());
         assertTrue(plan.has("capture"));
         assertTrue(plan.has("cameras"));
+        // v1.3（issue #98）：read 段进计划，且未声明时是空数组（不是缺字段）
+        assertTrue(plan.has("read"));
+        assertEquals(
+            0,
+            plan.getAsJsonArray("read")
+                .size());
 
         JsonObject world = plan.getAsJsonObject("world");
         assertEquals(
@@ -727,6 +734,120 @@ public class CaseParserTest {
         assertTrue(CriteriaEngine.isKnownType("image-uniform"));
         assertFalse(CriteriaEngine.isKnownType("nope"));
         assertEquals(9, CriteriaEngine.TYPES.size());
+    }
+
+    /**
+     * 判据类型自描述的<b>内容</b>锁（#103 G7：从「只锁数量」升级为「逐条 type/since/params 一致」）。
+     *
+     * <h2>为什么必须锁内容</h2>
+     * 原断言只写 {@code assertEquals(9, CriteriaEngine.TYPES.size())}——改名、改 {@code since}、
+     * 改 {@code params} 描述<b>都不会变红</b>（Gitea #97 §5-D3 判为「数量锁而非内容锁」）。
+     * 而自描述端点是<b>唯一权威</b>（{@code case.validate} 的 {@code criteriaTypes} 就是它的原样投影，
+     * docs 与测试都必须向它对齐）：描述错了比没有描述更糟——调用方会照着错的 {@code params} 写用例。
+     *
+     * <h2>三方对账是哪三方</h2>
+     * <ol>
+     * <li><b>自描述端点</b>（唯一权威）：{@link CriteriaEngine#typeCatalog()}——{@code case.validate}
+     * 把它摊在 {@code result.criteriaTypes}；</li>
+     * <li><b>注册表</b>：{@link CriteriaEngine#TYPES}（{@link CaseParser#parseCriteria} 用它判
+     * 「未知判据类型」）；</li>
+     * <li><b>契约文档</b>：{@code docs/control-plane/case-file.md §5} 的判据表。</li>
+     * </ol>
+     * 前两方由本测试机械锁死（同序、同集合、逐条 {@code since} 与 {@code params} 与下表一致）；
+     * 第三方（文档）无法在本进程里读，改由 {@code test/criteria/criteria-types.json} 落一份
+     * <b>从端点导出的快照</b>，并附 {@code test/criteria/README.md} 的对账方法——文档漂移因此
+     * 是一次可执行的比对，而不是靠人记得改。
+     */
+    @Test
+    public void criteriaTypeCatalogContentIsLocked() {
+        JsonArray catalog = CriteriaEngine.typeCatalog();
+        // ① 与注册表同序同集合（自描述是权威，注册表必须逐字对齐）
+        assertEquals("自描述条数必须等于注册表条数", CriteriaEngine.TYPES.size(), catalog.size());
+        for (int i = 0; i < catalog.size(); i++) {
+            JsonObject d = catalog.get(i)
+                .getAsJsonObject();
+            assertEquals(
+                "第 " + i + " 条自描述的 type 必须与 TYPES[" + i + "] 逐字相同（顺序即文档顺序）",
+                CriteriaEngine.TYPES.get(i),
+                Json.optString(d, "type", null));
+            assertNotNull("自描述缺 since: " + Json.toJson(d), Json.optString(d, "since", null));
+            assertFalse(
+                "自描述缺 params 说明: " + Json.toJson(d),
+                Json.optString(d, "params", "")
+                    .trim()
+                    .isEmpty());
+            // since 必须是契约小版本形态（与 contract.md §5 的 since 同口径）
+            assertTrue(
+                "since 形态非法（应为 x.y）: " + Json.optString(d, "since", null),
+                Json.optString(d, "since", "")
+                    .matches("\\d+\\.\\d+"));
+        }
+        // ② 逐条内容锁：type → since 的完整映射（改 since 必须同时改这里与文档）
+        assertEquals("1.0", CriteriaEngine.typeSince("artifact-exists"));
+        assertEquals("1.0", CriteriaEngine.typeSince("artifact-nonempty"));
+        assertEquals("1.0", CriteriaEngine.typeSince("json-field"));
+        assertEquals("1.0", CriteriaEngine.typeSince("world-hash-equals"));
+        assertEquals("1.0", CriteriaEngine.typeSince("event-emitted"));
+        assertEquals("1.1", CriteriaEngine.typeSince("image-size-equals"));
+        assertEquals("1.1", CriteriaEngine.typeSince("image-not-uniform"));
+        assertEquals("1.2", CriteriaEngine.typeSince("te-state-equals"));
+        assertEquals("1.2", CriteriaEngine.typeSince("image-uniform"));
+        assertNull("未登记类型必须返回 null", CriteriaEngine.typeSince("nope"));
+        // ③ 逐条 params 锁：params 说明里出现的参数名必须与校验器实际接受的参数一致
+        // （描述错了比没有描述更糟——调用方会照错的说明写用例）
+        assertEquals("path", paramsOf("artifact-exists"));
+        assertEquals("path, minBytes(默认1)", paramsOf("artifact-nonempty"));
+        assertEquals("path, pointer(RFC 6901), expect(必填)", paramsOf("json-field"));
+        assertEquals("—", paramsOf("world-hash-equals"));
+        assertEquals("kind, minCount(默认1)", paramsOf("event-emitted"));
+        assertEquals("path, width, height", paramsOf("image-size-equals"));
+        assertEquals("path, maxSameColorRatio(默认0.98)", paramsOf("image-not-uniform"));
+        assertEquals("at[x,y,z], key(RFC 6901 指针，对描述器输出), expect(必填)", paramsOf("te-state-equals"));
+        assertEquals("path, minSameColorRatio(默认0.98)", paramsOf("image-uniform"));
+    }
+
+    /** 取某判据类型的自描述 {@code params} 串。 */
+    private static String paramsOf(String type) {
+        JsonArray catalog = CriteriaEngine.typeCatalog();
+        for (int i = 0; i < catalog.size(); i++) {
+            JsonObject d = catalog.get(i)
+                .getAsJsonObject();
+            if (type.equals(Json.optString(d, "type", null))) {
+                return Json.optString(d, "params", null);
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 每个已注册判据类型都能被 {@code case.validate} 的 {@code criteriaTypes} 看到（#103 验收第 3 条）。
+     *
+     * <p>
+     * 这条断言的是「新增判据类型逐项在 {@code case.validate} 输出中可见，无漂移」：
+     * 自描述端点是唯一权威，{@code case.validate} 必须把它<b>原样</b>摊出来（不是子集、不是改写）。
+     */
+    @Test
+    public void validateExposesEveryCriteriaType() {
+        JsonArray catalog = CriteriaEngine.typeCatalog();
+        JsonArray fromPlan = CaseParser.criterionTypesJson();
+        assertEquals(CriteriaEngine.TYPES.size(), fromPlan.size());
+        for (int i = 0; i < catalog.size(); i++) {
+            String type = Json.optString(
+                catalog.get(i)
+                    .getAsJsonObject(),
+                "type",
+                null);
+            boolean found = false;
+            for (int k = 0; k < fromPlan.size(); k++) {
+                if (type.equals(
+                    fromPlan.get(k)
+                        .getAsString())) {
+                    found = true;
+                    break;
+                }
+            }
+            assertTrue("case.validate 的 criteriaTypes 缺该类型: " + type, found);
+        }
     }
 
     private static void assertArrayEqualsInts(int[] expected, int[] actual) {

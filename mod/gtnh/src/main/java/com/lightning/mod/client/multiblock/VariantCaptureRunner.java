@@ -61,7 +61,6 @@ import cpw.mods.fml.relauncher.SideOnly;
 public final class VariantCaptureRunner {
 
     public static final String OUTPUT_DIR = "variant_capture";
-    public static final String TRIGGER_FILE = "sde_variant_capture.json";
     public static final String SCHEMA = "lightning.multiblock.variant-capture/1";
     /** 单台机器的变体数上限；超过则按契约 §9.4 的 tierSample 抽样语义抽样，并在产物 notes 里写明。 */
     public static final int DEFAULT_MAX_VARIANTS_PER_MACHINE = 2000;
@@ -76,6 +75,17 @@ public final class VariantCaptureRunner {
 
     public static final class Config {
 
+        /**
+         * 自毁退出 / 删触发文件：<b>老触发文件通道的遗留开关</b>。
+         *
+         * <p>
+         * #104 之前它们由 {@code sde_variant_capture.json} 触发文件给出，由
+         * {@code VariantCaptureAutomation} 消费（跑完 {@code mc.shutdown()} / 删触发文件）。
+         * #104 删除了那条通道与 {@code readConfig(mc)}，因此这两个字段<b>不再有任何写入者</b>，
+         * 恒为默认值；保留是因为它们仍出现在运行报告（{@code report.json} 的 {@code exit} /
+         * {@code cleanupTrigger}）里，而控制面通道按 contract.md §9 的纪律显式把
+         * {@code cleanupTrigger} 置 false（禁止继承自毁退出）。
+         */
         public boolean exit = true;
         public boolean cleanupTrigger = true;
         /** 目标机器（simpleName 或 fqcn）；空 = 默认 4 台代表机。 */
@@ -115,6 +125,11 @@ public final class VariantCaptureRunner {
          * false = 只捕获 idle（T1.5 配置面「只导出结构性组合」），此时产物只声明 idle 一态。
          */
         public boolean includeActiveRunstate = true;
+        /**
+         * <b>产物根目录的绝对路径覆盖</b>（Gitea #102）：非空时 {@code outputDirName} 被忽略，
+         * {@code runDir} 直接建在它下面。默认 null ⇒ 既有行为逐字节不变。
+         */
+        public File outputRootOverride = null;
 
         public List<Integer> sampleFor(String machineSimpleName, String channelId) {
             Map<String, List<Integer>> perMachine = channelSample.get(machineSimpleName);
@@ -128,80 +143,13 @@ public final class VariantCaptureRunner {
     }
 
     public static File outputDir(Minecraft mc, Config cfg) {
+        if (cfg != null && cfg.outputRootOverride != null) {
+            return cfg.outputRootOverride;
+        }
         String name = cfg == null || cfg.outputDirName == null
             || cfg.outputDirName.trim()
                 .isEmpty() ? OUTPUT_DIR : cfg.outputDirName.trim();
         return new File(mc.mcDataDir, name);
-    }
-
-    public static File triggerFile(Minecraft mc) {
-        return new File(mc.mcDataDir, TRIGGER_FILE);
-    }
-
-    public static Config readConfig(Minecraft mc) {
-        Config c = new Config();
-        File f = triggerFile(mc);
-        if (!f.isFile()) return c;
-        try {
-            String text = readText(f).trim();
-            if (text.isEmpty()) return c;
-            JsonObject o = new JsonParser().parse(text)
-                .getAsJsonObject();
-            if (o.has("exit")) c.exit = o.get("exit")
-                .getAsBoolean();
-            if (o.has("cleanupTrigger")) c.cleanupTrigger = o.get("cleanupTrigger")
-                .getAsBoolean();
-            if (o.has("maxVariantsPerMachine")) c.maxVariantsPerMachine = o.get("maxVariantsPerMachine")
-                .getAsInt();
-            if (o.has("limitPerMachine")) c.limitPerMachine = o.get("limitPerMachine")
-                .getAsInt();
-            // 旧触发文件里的 includeThumbnails 被静默忽略：本路径恒不产出 thumbnailPNG（见 Config 字段注释）。
-            if (o.has("embedTextures")) c.embedTextures = o.get("embedTextures")
-                .getAsBoolean();
-            if (o.has("globalBudgetMs")) c.globalBudgetMs = o.get("globalBudgetMs")
-                .getAsLong();
-            if (o.has("verifyPositionsPerKey")) c.verifyPositionsPerKey = o.get("verifyPositionsPerKey")
-                .getAsInt();
-            if (o.has("fullVerifyUpTo")) c.fullVerifyUpTo = o.get("fullVerifyUpTo")
-                .getAsInt();
-            if (o.has("factsPath")) c.factsPath = o.get("factsPath")
-                .getAsString();
-            if (o.has("outputDirName")) c.outputDirName = o.get("outputDirName")
-                .getAsString();
-            if (o.has("includeActiveRunstate")) c.includeActiveRunstate = o.get("includeActiveRunstate")
-                .getAsBoolean();
-            if (o.has("channelSample") && o.get("channelSample")
-                .isJsonObject()) {
-                for (Map.Entry<String, JsonElement> me : o.getAsJsonObject("channelSample")
-                    .entrySet()) {
-                    if (!me.getValue()
-                        .isJsonObject()) continue;
-                    Map<String, List<Integer>> perMachine = new LinkedHashMap<String, List<Integer>>();
-                    for (Map.Entry<String, JsonElement> ce : me.getValue()
-                        .getAsJsonObject()
-                        .entrySet()) {
-                        if (!ce.getValue()
-                            .isJsonArray()) continue;
-                        List<Integer> vals = new ArrayList<Integer>();
-                        for (JsonElement ve : ce.getValue()
-                            .getAsJsonArray()) {
-                            vals.add(Integer.valueOf(ve.getAsInt()));
-                        }
-                        perMachine.put(ce.getKey(), vals);
-                    }
-                    c.channelSample.put(me.getKey(), perMachine);
-                }
-            }
-            if (o.has("machines") && o.get("machines")
-                .isJsonArray()) {
-                for (JsonElement e : o.getAsJsonArray("machines")) {
-                    c.machines.add(e.getAsString());
-                }
-            }
-        } catch (Throwable t) {
-            FMLLog.warning("[SDE][T1.3] 触发文件解析失败，使用默认配置: %s", t.toString());
-        }
-        return c;
     }
 
     // ------------------------------------------------------------------ 目标机
@@ -251,13 +199,13 @@ public final class VariantCaptureRunner {
 
     // ------------------------------------------------------------------ 主流程
 
-    public static JsonObject run(Minecraft mc) throws Exception {
-        return run(mc, readConfig(mc));
-    }
-
     /**
-     * 用**显式配置**跑一轮（T1.5 的 {@code /sde multiblock} 走这条：它自带机器清单、通道抽样与
-     * 产物目录，不读 T1.3 的触发文件）。除配置来源外，行为与 {@link #run(Minecraft)} 完全一致。
+     * 用**显式配置**跑一轮（T1.5 的 {@code /sde multiblock} 与 cp 的 {@code export.multiblock}
+     * 都走这条：自带机器清单、通道抽样与产物目录）。
+     *
+     * <p>
+     * <b>无触发文件入口</b>：{@code run(Minecraft)} 与 {@code readConfig(Minecraft)} 已随 Gitea #104
+     * 删除（老触发文件通道 {@code sde_variant_capture.json} 不再存在）。本方法是唯一入口。
      */
     public static JsonObject run(Minecraft mc, Config cfg) throws Exception {
         long started = System.currentTimeMillis();
@@ -1837,7 +1785,7 @@ public final class VariantCaptureRunner {
             "坐标+方块+meta 的内容签名（ProbeDummyWorld#stateSignature 同口径）：证明「构建结果与预期变体一致」");
         o.addProperty(
             "variants[].geometrySignature",
-            "四边形内容签名（材质定位串 + 4 位小数顶点 + 排序 + SHA-256，T0.3 StateGeometryCapture 同口径）：跨运行可重复性判据");
+            "四边形内容签名（材质定位串 + 4 位小数顶点 + 排序 + SHA-256，与已随 #104 删除的 T0.3 StateGeometryCapture 同口径）：跨运行可重复性判据");
         o.addProperty("variants[].paletteRefs", "该变体用到的全局调色板下标（升序去重），等价于 cellGrid 的值集合");
         o.addProperty("variants[].build", "构建事实：构造格数、舱口计划来源、形状键、MTE 实例序号（是否复用）");
         o.addProperty(

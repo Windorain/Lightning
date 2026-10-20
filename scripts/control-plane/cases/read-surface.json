@@ -1,0 +1,243 @@
+{
+  "schema": "lightning.case/1",
+  "id": "read-surface",
+  "label": "读面进判据：read 段执行读面动作，criteria 用 json-field 直接引用其产物",
+  "world": {
+    "folder": "cp_read_surface",
+    "seed": 20261007,
+    "void": true,
+    "base": [64, 12, 64],
+    "settleTicks": 60
+  },
+  "build": [
+    { "op": "clear", "from": [60, 10, 60], "to": [72, 18, 72] },
+    { "op": "block", "at": [65, 12, 64], "id": "minecraft:stone", "meta": 0 },
+    { "op": "block", "at": [66, 12, 64], "id": "minecraft:stone", "meta": 0 },
+    { "op": "block", "at": [67, 12, 64], "id": "minecraft:planks", "meta": 2 },
+    { "op": "block", "at": [65, 12, 65], "id": "minecraft:chest", "meta": 0 },
+    { "op": "te", "at": [65, 12, 65], "completer": "vanilla", "params": {} },
+    { "op": "wait", "ticks": 20 }
+  ],
+  "read": [
+    {
+      "action": "read.blocks",
+      "params": { "from": [64, 11, 63], "to": [69, 15, 68], "includeAir": true, "hash": true },
+      "path": "read/blocks.json",
+      "role": "read-blocks"
+    },
+    {
+      "action": "read.te",
+      "params": { "at": [[65, 12, 65], [65, 12, 64]], "includeNbt": true },
+      "path": "read/te.json",
+      "role": "read-te"
+    },
+    {
+      "action": "read.block",
+      "params": { "at": [65, 12, 65] },
+      "path": "read/block.json",
+      "role": "read-block"
+    },
+    {
+      "action": "read.player",
+      "params": {},
+      "path": "read/player.json",
+      "role": "read-player"
+    },
+    {
+      "action": "read.overview",
+      "params": { "entities": true, "topEntityTypes": 5 },
+      "path": "read/overview.json",
+      "role": "read-overview"
+    },
+    {
+      "action": "read.run",
+      "params": { "limit": 3 },
+      "path": "read/run.json",
+      "role": "read-run"
+    },
+    {
+      "action": "read.diff",
+      "params": { "expectManifestFile": "cp_read_surface", "maxChanges": 256 },
+      "path": "read/diff.json",
+      "role": "read-diff"
+    }
+  ],
+  "criteria": [
+    {
+      "id": "read-blocks-exists",
+      "type": "artifact-exists",
+      "params": { "path": "read/blocks.json" }
+    },
+    {
+      "id": "read-blocks-region-volume",
+      "type": "json-field",
+      "params": { "path": "read/blocks.json", "pointer": "/volume" },
+      "expect": 180
+    },
+    {
+      "id": "read-blocks-air-count",
+      "type": "json-field",
+      "params": { "path": "read/blocks.json", "pointer": "/airCount" },
+      "expect": 176
+    },
+    {
+      "id": "read-blocks-no-air-skipped",
+      "type": "json-field",
+      "params": { "path": "read/blocks.json", "pointer": "/airSkipped" },
+      "expect": 0
+    },
+    {
+      "id": "read-blocks-first-is-air",
+      "type": "json-field",
+      "params": { "path": "read/blocks.json", "pointer": "/blocks/0/blockId" },
+      "expect": 0
+    },
+    {
+      "id": "read-te-exists",
+      "type": "artifact-exists",
+      "params": { "path": "read/te.json" }
+    },
+    {
+      "id": "read-te-chest-is-vanilla",
+      "type": "json-field",
+      "params": { "path": "read/te.json", "pointer": "/tiles/0/tile/class" },
+      "expect": "net.minecraft.tileentity.TileEntityChest"
+    },
+    {
+      "id": "read-te-stone-claimed-family-is-explicit-null",
+      "type": "json-field",
+      "params": { "path": "read/te.json", "pointer": "/tiles/1/claimedFamily" },
+      "expect": null
+    },
+    {
+      "id": "read-te-absent-face-is-explicit-null",
+      "type": "json-field",
+      "params": { "path": "read/te.json", "pointer": "/tiles/0/families/0/state" },
+      "expect": null
+    },
+    {
+      "id": "read-block-chest-is-tesr",
+      "type": "json-field",
+      "params": { "path": "read/block.json", "pointer": "/block/render/isTesr" },
+      "expect": true
+    },
+    {
+      "id": "read-block-chest-id",
+      "type": "json-field",
+      "params": { "path": "read/block.json", "pointer": "/block/id" },
+      "expect": "minecraft:chest"
+    },
+    {
+      "id": "read-block-chest-has-tile-entity",
+      "type": "json-field",
+      "params": { "path": "read/block.json", "pointer": "/block/render/hasTileEntity" },
+      "expect": true
+    },
+    {
+      "id": "read-player-exists",
+      "type": "artifact-exists",
+      "params": { "path": "read/player.json" }
+    },
+    {
+      "id": "read-player-source-is-server",
+      "type": "json-field",
+      "params": { "path": "read/player.json", "pointer": "/dimension" },
+      "expect": 0
+    },
+    {
+      "id": "read-overview-exists",
+      "type": "artifact-exists",
+      "params": { "path": "read/overview.json" }
+    },
+    {
+      "id": "read-overview-weather-not-raining",
+      "type": "json-field",
+      "params": { "path": "read/overview.json", "pointer": "/weather/raining" },
+      "expect": false
+    },
+    {
+      "id": "read-run-exists",
+      "type": "artifact-exists",
+      "params": { "path": "read/run.json" }
+    },
+    {
+      "id": "read-diff-exists",
+      "type": "artifact-exists",
+      "params": { "path": "read/diff.json" }
+    },
+    {
+      "id": "read-diff-clean",
+      "type": "json-field",
+      "params": { "path": "read/diff.json", "pointer": "/different" },
+      "expect": 0
+    },
+    {
+      "id": "read-diff-checked-four",
+      "type": "json-field",
+      "params": { "path": "read/diff.json", "pointer": "/checked" },
+      "expect": 4
+    },
+    {
+      "id": "read-diff-hashes-equal",
+      "type": "json-field",
+      "params": { "path": "read/diff.json", "pointer": "/hashes/equal" },
+      "expect": true
+    },
+    {
+      "id": "read-diff-expect-source",
+      "type": "json-field",
+      "params": { "path": "read/diff.json", "pointer": "/expectSource" },
+      "expect": "expectManifestFile:cp_read_surface"
+    },
+    {
+      "id": "scene-manifest-exists",
+      "type": "artifact-exists",
+      "params": { "path": "world/scene-manifest.json" }
+    },
+    {
+      "id": "observation-exists",
+      "type": "artifact-nonempty",
+      "params": { "path": "observation.json", "minBytes": 2 }
+    },
+    {
+      "id": "world-hash-idempotent",
+      "type": "world-hash-equals"
+    }
+  ],
+  "variants": [
+    {
+      "id": "neg-diff-not-clean",
+      "mutate": [{ "op": "replace", "path": "/criteria/18/expect", "value": 999 }],
+      "expectCriteriaRed": ["read-diff-clean"]
+    },
+    {
+      "id": "neg-blocks-volume-wrong",
+      "mutate": [{ "op": "replace", "path": "/criteria/1/expect", "value": 1 }],
+      "expectCriteriaRed": ["read-blocks-region-volume"]
+    },
+    {
+      "id": "neg-tesr-flipped",
+      "mutate": [{ "op": "replace", "path": "/criteria/9/expect", "value": false }],
+      "expectCriteriaRed": ["read-block-chest-is-tesr"]
+    },
+    {
+      "id": "neg-null-becomes-wrong-value",
+      "mutate": [{ "op": "replace", "path": "/criteria/7/expect", "value": "lp-pipe" }],
+      "expectCriteriaRed": ["read-te-stone-claimed-family-is-explicit-null"]
+    }
+  ],
+  "evidence": {
+    "expect": [
+      { "path": "observation.json", "role": "observation" },
+      { "path": "criteria.json", "role": "criteria" },
+      { "path": "world/scene-manifest.json", "role": "scene-manifest" },
+      { "path": "read/blocks.json", "role": "read-blocks" },
+      { "path": "read/te.json", "role": "read-te" },
+      { "path": "read/block.json", "role": "read-block" },
+      { "path": "read/player.json", "role": "read-player" },
+      { "path": "read/overview.json", "role": "read-overview" },
+      { "path": "read/run.json", "role": "read-run" },
+      { "path": "read/diff.json", "role": "read-diff" }
+    ]
+  }
+}

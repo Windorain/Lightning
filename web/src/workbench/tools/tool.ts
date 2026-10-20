@@ -4,7 +4,8 @@ import type { SelectionContext, BlockRef } from '@/context/selection'
 import type { ViewportSlot } from '@/runtime/types'
 import type { InputBinding } from '@/keymap'
 import type { Frame } from '@/render/schema/types'
-import type { ScenePickEntity } from '@/render/interaction/scenePick'
+// R1-β① C8：形状契约迁出旧实现文件（见 `presentation/pickResult` 的说明）。
+import type { PickEntity } from '@/presentation/pickResult'
 
 export interface ToolHint {
   keys: string[]
@@ -54,7 +55,7 @@ export interface ToolContext {
   viewport: ViewportSlot
 
   pickVoxel(event: PointerEvent): BlockRef | null
-  pickAll(event: PointerEvent): ScenePickEntity[]
+  pickAll(event: PointerEvent): readonly PickEntity[]
   getCurrentFrame(): Frame | null
   /** 将 Y-up GridPos 转换为世界空间体素中心坐标 */
   gridCenterWorld(pos: { x: number; y: number; z: number }): { x: number; y: number; z: number } | null

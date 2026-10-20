@@ -18,7 +18,20 @@ const props = withDefaults(defineProps<{
   hasWorldMultiFrame: boolean
   worldFrameIndex: number
   worldFrameCount: number
-  framesPlaybackIsPlaying: boolean
+  /**
+   * 时间是否在前进（**呈现输入**）。
+   *
+   * ## 为什么这个 prop 不叫 `framesPlaybackIsPlaying`（P10 #261 改名）
+   *
+   * 旧名字与**被删除的权威字段**（`Main.framesPlaybackIsPlaying`）逐字同名。
+   * 那不只是"名字撞了"——它让退役审计的判据（按标识符扫描）无法区分
+   * "旧权威还在"与"某组件恰好用了同一个词描述自己的显示状态"。
+   * 一个**呈现**输入不该借用**领域权威**的名字：本组件只关心
+   * "要不要把播放按钮画成按下态"，它不拥有、也不判定"时间在不在走"。
+   *
+   * 改名后判据可以干净地归零，而本组件的行为一字未变。
+   */
+  isPlaying: boolean
   meshBusy: boolean
   gridHeight: number
   layerWorldY: number
@@ -119,13 +132,13 @@ const emit = defineEmits<{
     <div v-if="showFramePanel" class="vp-dock__panel vp-dock__panel--active">
       <WorldFramePlayerControls
         :has-world-multi-frame="hasWorldMultiFrame"
-        :is-playing="framesPlaybackIsPlaying"
+        :is-playing="isPlaying"
         @toggle="emit('togglePlayback')"
       />
       <WorldFrameScrubber
         :has-world-multi-frame="hasWorldMultiFrame"
         :frame-count="worldFrameCount"
-        :is-playing="framesPlaybackIsPlaying"
+        :is-playing="isPlaying"
         :mesh-busy="meshBusy"
         :world-frame-index="worldFrameIndex"
         @toggle-playback="emit('togglePlayback')"
@@ -215,12 +228,21 @@ const emit = defineEmits<{
 }
 .vp-dock--embed .vp-dock__panel { height: 48px; background: var(--nei-inset-bg); }
 .vp-dock--workbench .vp-dock__panel { height: 40px; background: var(--wb-bg-elevated); }
-/* 通道面板：内容高度随声明条数增长（视口下方栏按需变高，超过上限内部滚动） */
-.vp-dock__panel--channels {
-  height: auto; min-height: 40px; max-height: 152px;
-  align-items: stretch; overflow-y: auto;
+/* 通道面板：内容高度随声明条数增长（视口下方栏按需变高，超过上限内部滚动）
+ *
+ * ⚠️ 选择器必须是**两类**（`.vp-dock__panel.vp-dock__panel--channels`）：
+ * 主题规则 `.vp-dock--workbench .vp-dock__panel { height: 40px }` 也是两类的特异性，
+ * 单类选择器压不过它 —— 实测（1440×900，内置 EBF 样例）面板被钉在 40px，
+ * 只露 Tier/Height，Coil/Glass 落在面板外且页面底边也被裁（P4 手测发现）。
+ *
+ * `max-height: min(152px, 25vh)`：4 条滑杆的自然高度约 90px；通道更多的文档在
+ * **可用高度内滚动**（不把画布挤没，也不会被窗口底边裁掉）。 */
+.vp-dock__panel.vp-dock__panel--channels {
+  height: auto; min-height: 40px;
+  max-height: min(152px, 25vh);
+  align-items: stretch; overflow-y: auto; overscroll-behavior: contain;
 }
-.vp-dock--embed .vp-dock__panel--channels { min-height: 48px; }
+.vp-dock--embed .vp-dock__panel.vp-dock__panel--channels { min-height: 48px; }
 .vp-dock__panel :deep(.wm-wfs),
 .vp-dock__panel :deep(.wm-wfp-controls),
 .vp-dock__panel :deep(.wm-layer-bar) {

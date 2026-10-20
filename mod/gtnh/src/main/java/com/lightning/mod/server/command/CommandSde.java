@@ -204,7 +204,7 @@ public class CommandSde extends CommandBase {
                     break;
                 case "multiblock": {
                     // T1.5：枚举（T1.2）→ 逐台变体构建+捕获（T1.3）→ 因子化编码（T1.4）→ 信封落盘。
-                    // 实际执行在客户端 tick（client/multiblock/MultiblockExportAutomation）；
+                    // 实际执行走 cp 的 export.multiblock 动作（#104 之前走客户端 tick 的 MultiblockExportAutomation，已删除）；
                     // 命令只登记请求，故本类不引用任何 @SideOnly(CLIENT) 类。
                     if (!(sender instanceof EntityPlayerMP)) {
                         sender.addChatMessage(new ChatComponentText("SDE: /sde multiblock 仅玩家（集成服客户端）可用"));

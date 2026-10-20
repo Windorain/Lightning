@@ -15,6 +15,11 @@
  *   因此本脚本可以对着任何按契约 v1 自描述的控制面调用任何动作，包括它从未见过的
  *   动作（PR-2 的 shot.multi / capture.* 也一样）——这正是「自描述即可调用」的验收点。
  *
+ *   **但「自描述里的 default」不被代填**（Gitea #126）：default 是被工具链接管的输入而不是文档，
+ *   代填会让「调用方没给」与「调用方给的就是默认值」不可分，从而把「缺省取决于调用形态」的参数
+ *   （`capture.diag` 的 arm/reset）架空成单一值。未提供的参数一律不写进请求体；显式给的
+ *   false/0/null/"" 原样保留。回归见 `scripts/control-plane/caller-defaults.test.mjs`。
+ *
  * 用法：
  *   node caller.mjs <actionName> [paramsJson] [options]
  *     paramsJson            JSON 对象字面量；以 @ 开头视为「从该文件读取 JSON」
@@ -43,7 +48,7 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const EXIT_DONE = 0;
 const EXIT_CALL_ERROR = 1;
@@ -90,7 +95,10 @@ function usage() {
   --describe                      打印动作自描述 JSON 后退出
   --actions                       打印动作目录 JSON 后退出
   --help
-退出码: 0=done 1=调用错误 2=作业 failed 3=超时`;
+退出码: 0=done 1=调用错误 2=作业 failed 3=超时
+
+缺省口径（Gitea #126）：未提供的选填参数**不写入请求体**（服务端缺省逻辑生效，调用器不代填
+自述里的 default）；调用方显式给的值（含 false / 0 / null / ""）原样保留，不做 falsy 判断。`;
 }
 
 // --------------------------------------------------------------------------- 参数解析
@@ -293,8 +301,23 @@ function paramNames(desc) {
 }
 
 /**
- * 按自描述构造调用体：校验动作存在 → 校验必填参数 → 未提供的选填参数补默认值。
- * 任何「参数名不在自描述里」都直接报错，避免把契约漂移伪装成服务端 CP-VALID-002。
+ * 按自描述构造调用体：校验动作存在 → 校验必填参数 → <b>缺省的参数一律不写进请求体</b>。
+ *
+ * <h2>为什么不物化 default（Gitea #126）</h2>
+ *
+ * 旧行为是「凡自述里带 `default` 的选填参数，未提供就补进请求体」。这使服务端收到的永远是
+ * 「显式传了该参数」——<b>「调用方没给」与「调用方给的就是默认值」不再可分</b>。后果不是风格问题：
+ * 凡「缺省取决于调用形态」的参数（`capture.diag` 的 `arm`/`reset`：纯 dump 时必须「不动」），
+ * 只要动作因故声明了 `default`，三态语义会在到达动作<b>之前</b>就被工具链架空成单一值
+ * （#114 实机事故：纯 dump 顺手重新布防并清零计数，把刚采到的现场抹掉，而返回值仍是合法 JSON）。
+ *
+ * 现在的口径（显式化，不是「选项」）：
+ *   - 缺省参数<b>不写</b>进请求体 ⇒ 服务端缺省逻辑生效（自述的 default 只是文档/契约声明）；
+ *   - 调用方显式给的值<b>原样保留</b>——`false` / `0` / `null` / `""` 都不得被 falsy 判断吞掉
+ *     （本函数只做浅拷贝 + 缺键检查，从不用 `||`/`??` 改写已给的值）；
+ *   - 触发了哪些缺省、哪些是显式值，都在日志里点名（可复核，不靠猜）。
+ *
+ * 参数未在自描述中声明仍然直接报错（把契约漂移暴露在本地，而不是伪装成服务端 CP-VALID-002）。
  */
 function buildBody(desc, provided, opts) {
   const declared = Array.isArray(desc.params) ? desc.params : [];
@@ -306,14 +329,17 @@ function buildBody(desc, provided, opts) {
     throw new Error(`缺少必填参数 ${missing.join(', ')}；自描述参数: ${paramNames(desc).join(', ') || '(无)'}`);
   }
 
-  const filled = [];
-  for (const p of declared) {
-    if (!(p.name in body) && Object.prototype.hasOwnProperty.call(p, 'default') && p.default !== null) {
-      body[p.name] = p.default;
-      filled.push(p.name);
-    }
+  // Gitea #126：不物化 default。这里只**报告**哪些参数将以服务端缺省生效，绝不代填。
+  const defaulted = declared
+    .filter((p) => !(p.name in body) && Object.prototype.hasOwnProperty.call(p, 'default') && p.default !== null)
+    .map((p) => p.name);
+  if (defaulted.length > 0) {
+    say(`未提供的选填参数不写入请求体（服务端缺省逻辑生效，调用器不代填）: ${defaulted.join(', ')}`);
   }
-  if (filled.length > 0) say(`选填参数按自描述默认值补齐: ${filled.join(', ')}`);
+  const explicit = Object.keys(body).filter((k) => byName.has(k));
+  if (explicit.length > 0) {
+    say(`调用方显式给出、原样保留: ${explicit.map((k) => `${k}=${JSON.stringify(body[k])}`).join(', ')}`);
+  }
 
   const unknown = Object.keys(body).filter((k) => k !== 'confirm' && !byName.has(k));
   if (unknown.length > 0 && !opts.allowUnknownParams) {
@@ -323,7 +349,7 @@ function buildBody(desc, provided, opts) {
   }
   if (unknown.length > 0) sayErr(`WARN 自描述未声明的参数将被直传: ${unknown.join(', ')}`);
 
-  // 类型粗检（只告警不阻断：服务端才是权威校验者）
+  // 类型粗检（只告警不阻断：服务端才是权威校验者；Gitea #131 之后 TYPE_INT 由服务端严格裁决）
   for (const [k, v] of Object.entries(body)) {
     const p = byName.get(k);
     if (!p) continue;
@@ -339,6 +365,8 @@ function buildBody(desc, provided, opts) {
   }
   return body;
 }
+
+export { buildBody };
 
 // --------------------------------------------------------------------------- 作业
 
@@ -534,11 +562,30 @@ function callError(opts, httpStatus, e, extra = {}) {
   return EXIT_CALL_ERROR;
 }
 
-main()
-  .then((code) => {
-    process.exitCode = code;
-  })
-  .catch((e) => {
-    sayErr(`本地错误: ${e.message}`);
-    process.exitCode = EXIT_CALL_ERROR;
-  });
+/**
+ * 仅在「直接被 node 当脚本跑」时进 main。
+ *
+ * <p>
+ * 判据而不是「有没有 argv」：`node caller-defaults.test.mjs` 会 import 本文件取 {@link buildBody}，
+ * 若 import 就执行 main，任何单测都会顺手发一次真实 HTTP 请求（还会因为缺 server.json 而失败）。
+ */
+const INVOKED_DIRECTLY = (() => {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  try {
+    return import.meta.url === pathToFileURL(entry).href;
+  } catch {
+    return false;
+  }
+})();
+
+if (INVOKED_DIRECTLY) {
+  main()
+    .then((code) => {
+      process.exitCode = code;
+    })
+    .catch((e) => {
+      sayErr(`本地错误: ${e.message}`);
+      process.exitCode = EXIT_CALL_ERROR;
+    });
+}

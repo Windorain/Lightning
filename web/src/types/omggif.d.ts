@@ -9,6 +9,8 @@ declare module 'omggif' {
     palette?: number[] | null
     delay?: number
     disposal?: number
+    /** 透明色索引（M5-4 起显式声明：`addFrame` 会据此写 Graphics Control Extension）。 */
+    transparent?: number | null
   }
 
   export class GifWriter {

@@ -1,6 +1,9 @@
 package com.lightning.mod.client.multiblock;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -22,6 +25,7 @@ import org.lwjgl.opengl.GL11;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
+import com.lightning.mod.client.export.MaterialBlendMode;
 import com.lightning.mod.client.meshcapture.MeshCaptureService;
 import com.lightning.mod.client.meshcapture.TessellatorCaptureState;
 import com.lightning.mod.client.meshcapture.TessellatorCaptureState.CapturedBlockInstance;
@@ -278,7 +282,7 @@ public final class VariantGeometryBakery {
             : (newKeys > 0 ? "sampled(新状态键抽样验证)" : "anchored(每键锚定捕获 + 已验证状态共享)");
 
         Collections.sort(perPositionLines);
-        out.geometrySignature = StateGeometryCapture.sha256Base64(join(perPositionLines, "\n"));
+        out.geometrySignature = sha256Base64(join(perPositionLines, "\n"));
         out.layoutSignature = world.stateSignature();
         out.paletteRefs.addAll(refs);
 
@@ -369,7 +373,8 @@ public final class VariantGeometryBakery {
         out.positionsCaptured++;
         // applySpriteLocalToQuad 会把顶点 UV 就地改写成 sprite 局部 [0,1] 并写回 q.materialKey，
         // 因此**每个四边形只能调用一次**（重复调用会把局部 UV 当图集 UV 再解析 → 退化成 "unknown"）。
-        MeshCaptureService.CaptureToolkit.attachQuadMaterials(inst, textureMap, palette.materials());
+        MeshCaptureService.CaptureToolkit
+            .attachQuadMaterials(inst, textureMap, palette.materials(), MaterialBlendMode.of(block));
         JsonObject geometry = MeshCaptureService.CaptureToolkit.geometryOf(inst);
         // 注意：不传 Block —— 调色板条目不再带 thumbnailPNG（GPU 像素跨运行不稳定，见 GeometryPalette 类注释）。
         return palette.intern(registryId, meta, geometry, block.isOpaqueCube(), referencedByMachine, inst.quads.size());
@@ -408,6 +413,27 @@ public final class VariantGeometryBakery {
             sb.append(parts.get(i));
         }
         return sb.toString();
+    }
+
+    /**
+     * 几何签名哈希口径：UTF-8 文本 → SHA-256 → Base64。
+     *
+     * <p>
+     * 出处：Gitea #104 之前由 {@code StateGeometryCapture.sha256Base64} 提供（那是一个**第二套捕获实现**，
+     * 违反 #96 §10-E4①「唯一捕获实现」，已随 #104 按 V12 裁决整体删除）。本类是那条口径的**生产消费方**
+     * （{@code geometrySignature} 是产物字段），故把这段与实现无关的哈希口径就地保留在消费方，
+     * <b>不改动算法</b>：同一输入必须得到与 #104 之前逐字节相同的签名，否则跨版本产物不可比。
+     * 失败时返回 {@code "sha256-error"}（与老口径一致，不抛异常中断烘焙）。
+     */
+    private static String sha256Base64(String input) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] digest = md.digest(input.getBytes(StandardCharsets.UTF_8));
+            return Base64.getEncoder()
+                .encodeToString(digest);
+        } catch (Exception e) {
+            return "sha256-error";
+        }
     }
 
     private static String describe(Throwable t) {

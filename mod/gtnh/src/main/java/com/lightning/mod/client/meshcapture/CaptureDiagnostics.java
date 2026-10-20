@@ -19,14 +19,20 @@ import cpw.mods.fml.common.FMLLog;
  * zeroFlow、DirectTessellator 钩子自检、坐标系自证日志要点）聚合成一份 JSON。
  * <p>
  * 为什么存在：设计基线（#55）要求「静默漏录不可接受」——录窗开着但零几何流入必须可检测。
- * 本类是 zeroFlow 事件与钩子自检标志的唯一落点；探针（{@code CaptureChannelProbeAutomation}）
- * 与人工排障都读这份 JSON。
+ * 本类是 zeroFlow 事件与钩子自检标志的唯一落点；读面动作 {@code read.capture}
+ * （{@code client/controlplane/mc/read/ReadCaptureAction}）与人工排障都读这份 JSON。
  * <p>
  * 纯观察论证：只读录窗层上报的计数，不触碰任何游戏/渲染状态；未启用时每个 {@code note*} 入口
  * 只付一次布尔判断（{@link #noteDirectTessellatorVertex} 额外置一个静态位，那是自检语义本身）。
  * <p>
  * 启用方式（任选其一，都是「一次设定」）：① JVM 属性 {@code sde.captureDiag.file=<路径>}（进程退出时自动落盘）；
- * ② 探针调用 {@link #beginSession()} 开启程序化会话并自行 {@link #write(Path)}。
+ * ② 控制面动作 {@code capture.diag} 调 {@link #beginSession()} 开启程序化会话，读面 {@code read.capture}
+ * 直接读 {@link #toJson()}（会话是否开启由 {@link #isSessionEnabled()} 如实暴露，
+ * 使「未采集导致的 0」与「采集到零流入」在读数上分得开）；③ 自行 {@link #write(Path)} 落盘。
+ * <p>
+ * <b>会话生命周期</b>：{@link #beginSession()} 开（并清零计数）、{@link #endSession()} 关。
+ * <b>{@link #endSession()} 不清计数</b>——撤防之后已经采到的证据必须仍然可读，
+ * 否则「撤防」会顺手销毁刚采到的现场。
  * <p>
  * gson 铁律：运行期 FML 实载 gson 2.2.4，本类只用手工 {@link JsonObject}/{@link JsonArray}（无 2.3+ API）。
  */
@@ -103,6 +109,31 @@ public final class CaptureDiagnostics {
             resetAllLocked();
             sessionEnabled = true;
         }
+    }
+
+    /**
+     * 关闭程序化会话（不清计数——撤防后已采到的证据必须仍可读）。
+     *
+     * @return 调用前是否处于「程序化会话开启」状态（false = 本来就关着，幂等成功）
+     */
+    public static boolean endSession() {
+        synchronized (LOCK) {
+            boolean was = sessionEnabled;
+            sessionEnabled = false;
+            return was;
+        }
+    }
+
+    /**
+     * 程序化会话是否开启（{@link #beginSession()} 之后、{@link #endSession()} 之前为 true）。
+     *
+     * <p>
+     * 与 {@link #isEnabled()} 的区别：后者还含 JVM 属性与单测开关。读面用本方法回答
+     * 「这次的读数是不是真的采过」——不开会话时的全 0 是「没采」，不是「采到零流入」，
+     * 两者必须分得开（§8.5 不空转绿）。
+     */
+    public static boolean isSessionEnabled() {
+        return sessionEnabled;
     }
 
     public static boolean isDirectTessellatorHookEverSeen() {

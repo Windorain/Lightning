@@ -271,6 +271,154 @@ export class RuntimeDocument {
     return out
   }
 
+  /**
+   * **换一批注解**（#301 P10f C′2 的回写落点）。
+   *
+   * ## 为什么需要它（而不是调用方自己 `clone()` 后改字段）
+   *
+   * C′2 的同步桥要"把内核注解投影回 legacy"，而调用方（`runtime/context`）是
+   * **旧层**代码：让它 `clone()` + 直接改 `annotations` 会绕开本类的封装，
+   * 且**每处调用点都要自己写一遍**（那正是本项目三度实测会漂移的形态）。
+   *
+   * ## 为什么返回 `this` 而不是抛错/空洞
+   *
+   * **内容相同 ⇒ 返回 `this`**（引用相等）。调用方据此判断"无需回写"，
+   * 于是**不 bump 内容重读信号** ⇒ 渲染链不做无谓重建。
+   * 这是"净零往返不重建"的落地：同一份内容回写两次，第二次是零成本。
+   *
+   * ⚠️ 判定用**逐字段等价**而不是引用相等：投影每次都会新建数组与行对象
+   * （纯函数不得返回共享可变结构），故引用比较恒不等 —— 那会让本方法永远"有变化"。
+   *
+   * ## 它**不**碰版本/基线/历史
+   *
+   * 那些字段表示"哪一份文档、是否脏、可否撤销"，与本方法无关。
+   * （`RuntimeDocument` 本身也不持版本 —— 版本在 `Context.versionOf`。）
+   */
+  withAnnotations(next: readonly Record<string, unknown>[]): RuntimeDocument {
+    const current = this.annotations as readonly Record<string, unknown>[]
+    if (sameAnnotationRows(current, next)) return this
+    const clone = this.clone()
+    // `annotations` 是 `readonly` 声明、非冻结数组 ⇒ 就地替换内容（`clone()` 已给出新数组）
+    ;(clone as unknown as { annotations: unknown[] }).annotations = [...next]
+    return clone
+  }
+
+  /**
+   * **换某一帧的网格**（R1-β① C1 的回写落点）。
+   *
+   * ## 为什么需要它（与 `withAnnotations`/`withCellTooltips` 同一纪律）
+   *
+   * `Context#syncLegacyFromKernel` 的文件头**明文写着**：
+   *
+   * > 「网格/材质/帧轴仍**不写**（内核侧尚无对应写命令 ⇒ 无需回写）；
+   * > 将来若要写它们，必须**同时**扩本方法。」
+   *
+   * R1-β① 落地的 `moveCells`/`setCellContent` 正是"写网格" ⇒ 本轮必须**同批**补上
+   * 本方法，否则重演 **#333**（内核写了、legacy 没投影 ⇒ 提交成功但看不见）。
+   *
+   * ## 为什么入参是**已解析的 `Grid`** 而不是网格载荷
+   *
+   * 本类（`context/`）**不得**认识内核载荷形状 —— 那属 `composition/` 的投影职责
+   * （见 `composition/kernelProjection#projectToLegacyGrid`，它是装配
+   * `kernelAssembly` 的**逆**，且与投影侧共用同一张逐格映射表，故两处不可能漂移）。
+   * ⇒ 本方法只做"把一个解析好的 `Grid` 装进某一帧"这一件事。
+   *
+   * ## `frameIndex` 的语义 = **帧下标**（不是对象 id）
+   *
+   * 调用方（`syncLegacyFromKernel`）按装配面 `frameObjects` 的顺序逐帧对应；
+   * 越界的 `frameIndex` 是**调用方缺陷** ⇒ 返回 `this`（无变化），不静默新建帧
+   * （新建帧会让帧数与声明轴脱节 —— 投影侧不猜帧）。
+   *
+   * ## `grid === null` 的语义 = **该帧确实没有网格**（不是"不改"）
+   *
+   * 内核侧"这一帧没有 `blockGrid`"是**权威事实**（多方块文档的帧**设计上**没有网格，
+   * 与 `Context#kernelGrid` 返回 `null` 同一口径）⇒ legacy 也必须被清成 `null`。
+   * 调用方若想"不动"，就**不要调**本方法。
+   *
+   * ## 为什么返回 `this` 而不是抛错/空洞
+   *
+   * 与 `withAnnotations` 逐字同口径：**内容相同 ⇒ 返回 `this`**，调用方据此跳过回写
+   * ⇒ 不 bump 内容重读信号（"净零往返不重建"）。
+   * 比较用**引用相等**：`Grid` 是可变类，投影每次都新建实例 ⇒ 引用不等即"有变化"。
+   * ⚠️ 这正是"不得把 `Grid` 做成有状态缓存读面"的同一条理由
+   * （见 `runtime/gridRead` 与 `legacy-grid-edit-handle` 接缝）：`Grid` 是**值载体**，
+   * 它一旦成为共享可变对象，"读到的是快照"这条保证就消失。
+   *
+   * ## 它**不**碰版本/基线/历史
+   *
+   * 同 `withAnnotations`（编辑语义 ⇒ 回写后文档仍是脏的）。
+   */
+  withGrid(frameIndex: number, grid: Grid | null): RuntimeDocument {
+    const at = this.frames.findIndex((f) => f.index === frameIndex)
+    if (at === -1) return this
+    const current = this.frames[at]!
+    if (current.grid === grid) return this
+    const clone = this.clone()
+    clone.frames[at] = new RuntimeFrame(
+      current.index,
+      current.label,
+      grid,
+      current.durationMs,
+      current.multiblock,
+    )
+    return clone
+  }
+
+  /**
+   * **换逐格说明侧表**（#301 P10f D2 收尾 / #333 的回写落点）。
+   *
+   * ## 为什么需要它（与 `withAnnotations` 同一理由，且**同一批**）
+   *
+   * D0 段二让"逐格说明编辑"改走内核命令（`setCellTooltip`），但**没有**扩
+   * `Context#syncLegacyFromKernel` —— 而那个方法的文件头**明文写着**：
+   *
+   * > 「网格/材质/帧轴本批**不写**，故无需回写；将来若要写它们，
+   * > 必须**同时**扩本方法（成对铁律第④项：同一事实的全部消费者同批迁移）。」
+   *
+   * ⇒ 那次迁移**违反了它自己引用的纪律**：内核写了 `cellContent.tooltip`，
+   * legacy 侧表没被投影，而面板读 legacy ⇒ "提交成功但看不到"（**#333**）。
+   * 本方法与 `syncLegacyFromKernel` 的扩展就是那条纪律的补做。
+   *
+   * ## 两个字段**成对**替换（契约 §逐格说明的成对 idioms）
+   *
+   * `tooltipPalette`（文案池）+ `cellTooltipGrid`（下标网格）是**一对**：
+   * 只换一个会留下"悬空下标"（正是 #80 加锁防的形态）。
+   * ⇒ 本方法只暴露**成对**入口，不提供单字段写（结构上让"写一半"不可表达）。
+   *
+   * ## `undefined` 的语义 = **清除**（不是"不改"）
+   *
+   * 内核侧"没有任何逐格说明"是**权威事实** ⇒ legacy 侧表必须被清成"没有"。
+   * 若把 `undefined` 解释成"不改"，则"删掉最后一条说明"会**无声地不生效**
+   * （内核已删、legacy 仍留着旧池与旧网格）—— 那正是本方法要修的那类缺陷。
+   * 调用方若想"不动"，就**不要调**本方法（而不是传 `undefined`）。
+   *
+   * ## 为什么返回 `this` 而不是抛错/空洞
+   *
+   * 与 `withAnnotations` 逐字同口径：**内容相同 ⇒ 返回 `this`**，调用方据此跳过
+   * 回写 ⇒ 不 bump 内容重读信号（"净零往返不重建"）。比较用**逐元素等价**而非
+   * 引用相等（投影每次新建数组）。
+   *
+   * ## 它**不**碰版本/基线/历史
+   *
+   * 同 `withAnnotations`（编辑语义 ⇒ 回写后文档仍是脏的）。
+   */
+  withCellTooltips(
+    palette: readonly string[] | undefined,
+    grid: readonly number[][][] | undefined,
+  ): RuntimeDocument {
+    if (sameTooltipPool(this.tooltipPalette, palette) && sameTooltipGrid(this.cellTooltipGrid, grid)) return this
+    const clone = this.clone()
+    const mutable = clone as unknown as {
+      tooltipPalette: string[] | undefined
+      cellTooltipGrid: number[][][] | undefined
+    }
+    // 深拷贝（`clone()` 已给出新数组，这里再按层复制，避免与投影产物共享可变结构）
+    mutable.tooltipPalette = palette === undefined ? undefined : [...palette]
+    mutable.cellTooltipGrid =
+      grid === undefined ? undefined : grid.map((s) => (s ? s.map((r) => (r ? [...r] : []) ) : []))
+    return clone
+  }
+
   clone(): RuntimeDocument {
     return new RuntimeDocument({
       formatVersion: this.formatVersion,
@@ -563,4 +711,112 @@ export class RuntimeDocument {
 
     return grid
   }
+}
+
+/**
+ * 两批注解行是否**逐字段等价**（#301 P10f C′2 的"净零往返"判定）。
+ *
+ * ## 为什么不能用 `JSON.stringify` 比较
+ *
+ * 键的顺序会影响 `JSON.stringify` 的产物，而本函数的两个输入来自
+ * **不同来源**（legacy 原行 vs 内核投影行）—— 键序不同会让"其实没变"判成"变了"，
+ * 后果是每次回写都 bump 内容重读信号 ⇒ 渲染链无谓重建。
+ *
+ * ## 为什么只比"投影会产出的那些键"
+ *
+ * legacy 行可能带投影**不认识**的额外键（用户数据 / 未来扩展）。那些键
+ * **不参与**等价判定：本函数的用途是"内核投影是否与现状相同"，
+ * 而投影产物里根本没有它们 ⇒ 不该因为它们存在就判"不同"（那会让回写反复发生）。
+ *
+ * ⚠️ 代价是：若调用方传入的行**丢掉了** legacy 的额外键，本函数会说"相同"
+ * 从而**不丢**它们（因为不写）。这是**有意的**保守方向 —— 宁可少写，不可误删。
+ */
+/**
+ * 逐格说明**池**的逐元素等价（`withCellTooltips` 的"内容相同 ⇒ 返回 `this`"判据）。
+ *
+ * `undefined` 与"空数组"**不等价**：前者 = 没有该侧表（文件里不写这个键），
+ * 后者 = 有但为空（文件里写 `[]`）。这正是本工程"缺席 ≠ 空"的口径，
+ * 也是 `projectionFidelity` 的 D1+ 判据所钉的那条。
+ */
+function sameTooltipPool(a: readonly unknown[] | undefined, b: readonly unknown[] | undefined): boolean {
+  if (a === undefined || b === undefined) return a === b
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
+  return true
+}
+
+/** 逐格说明**下标网格**的逐元素等价（同上；`undefined` 与全 `-1` 不等价）。 */
+function sameTooltipGrid(a: readonly number[][][] | undefined, b: readonly number[][][] | undefined): boolean {
+  if (a === undefined || b === undefined) return a === b
+  if (a.length !== b.length) return false
+  for (let z = 0; z < a.length; z++) {
+    const sa = a[z]
+    const sb = b[z]
+    if (sa === undefined || sb === undefined) {
+      if (sa !== sb) return false
+      continue
+    }
+    if (sa.length !== sb.length) return false
+    for (let r = 0; r < sa.length; r++) {
+      const ra = sa[r]
+      const rb = sb[r]
+      if (ra === undefined || rb === undefined) {
+        if (ra !== rb) return false
+        continue
+      }
+      if (ra.length !== rb.length) return false
+      for (let c = 0; c < ra.length; c++) if (ra[c] !== rb[c]) return false
+    }
+  }
+  return true
+}
+
+function sameAnnotationRows(
+  a: readonly Record<string, unknown>[],
+  b: readonly Record<string, unknown>[],
+): boolean {
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i]!
+    const y = b[i]!
+    // 以 `b`（新投影产物）的键为准：它定义了"这次投影认得的字段集"
+    for (const key of Object.keys(y)) {
+      if (!sameField(x[key], y[key])) return false
+    }
+    // 反向：`a` 里有、`b` 里没有的**投影字段**也算变化 ——
+    // 例如内核删掉了 `locked`，而 legacy 还带着 `true`。
+    // 只检查 `b` 认得的那类键（`ANNOTATION_FIELD_PAIRS` 的 legacy 侧）之外的键不管，
+    // 故这里用"`a` 有而 `b` 明确为 undefined"来判定。
+    for (const key of Object.keys(x)) {
+      if (x[key] === undefined) continue
+      if (y[key] === undefined && PROJECTED_KEYS.has(key)) return false
+    }
+  }
+  return true
+}
+
+/** 投影会产出的 legacy 键（与 `runtime/annotationRead` 的字段表一致）。 */
+const PROJECTED_KEYS: ReadonlySet<string> = new Set([
+  'id',
+  'type',
+  'visible',
+  'title',
+  'description',
+  'min',
+  'max',
+  'pos',
+  'points',
+  'color',
+  'renderStyle',
+  'locked',
+  'frameIndex',
+  'created_at',
+  'updated_at',
+])
+
+/** 标量直比；对象/数组走结构比较（投影产出的是冻结的普通对象）。 */
+function sameField(x: unknown, y: unknown): boolean {
+  if (x === y) return true
+  if (x === null || y === null || typeof x !== 'object' || typeof y !== 'object') return false
+  return JSON.stringify(x) === JSON.stringify(y)
 }

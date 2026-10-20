@@ -39,11 +39,18 @@ public final class SceneEnvelopeBuilder {
             copyIfPresent(rawFinal, meta, "schemaVersion");
             // T1.4（契约 §8.1）：文档级形态枚举量进 meta —— "multiblock" 与缺省的"帧为主"互斥。
             copyIfPresent(rawFinal, meta, "documentShape");
+            // Gitea #102（契约 1.6）：cp 通道的导出溯源进 meta —— C3「同会话同缓冲」判据读它。
+            // 命令通道不写这两个字段 ⇒ copyIfPresent 天然字节干净（既有产物逐字节不变）。
+            copyIfPresent(rawFinal, meta, "provenance");
+            copyIfPresent(rawFinal, meta, "exportId");
             copyIfPresent(rawFinal, inner, "frames");
             copyIfPresent(rawFinal, inner, "materialPalette");
             copyIfPresent(rawFinal, inner, "blockPalette");
             copyIfPresent(rawFinal, inner, "textureBlobs");
             copyIfPresent(rawFinal, inner, "tooltipPalette");
+            // #82：成对 idioms 的另一半——frames 分支也搬 cellTooltipGrid（与非 frames 分支对齐）；
+            // copyIfPresent 天然字节干净：文档本来没有时不会凭空出现。
+            copyIfPresent(rawFinal, inner, "cellTooltipGrid");
             // P1.7（部件）：帧结构的 cellPartsGrid/partLists 随 frames 整体随行；
             // 文档级 statsTemplate/partIconTextures 仅在含部件数据时存在（copyIfPresent 天然字节干净）。
             copyIfPresent(rawFinal, inner, "statsTemplate");
@@ -67,6 +74,10 @@ public final class SceneEnvelopeBuilder {
             copyIfPresent(rawFinal, meta, "initialCamera");
             copyIfPresent(rawFinal, meta, "scanBounds");
             copyIfPresent(rawFinal, meta, "schemaVersion");
+            // Gitea #102（契约 1.6）：裸单结构形态的溯源留在根上（与 World 形态的 meta 位置不同，
+            // 口径见 docs/contracts/format-scene-file.md §6）。命令通道不写 ⇒ 既有产物逐字节不变。
+            copyIfPresent(rawFinal, meta, "provenance");
+            copyIfPresent(rawFinal, meta, "exportId");
             copyIfPresent(rawFinal, inner, "blockPalette");
             copyIfPresent(rawFinal, inner, "materialPalette");
             copyIfPresent(rawFinal, inner, "cellGrid");

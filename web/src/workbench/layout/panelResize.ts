@@ -21,7 +21,9 @@ export interface PanelResizeState {
 /** @param ctx Workbench 时绑定 ScreenRoot.layout；省略则仅本地 ref（测试/孤立） */
 export function usePanelResize(ctx?: Context): PanelResizeState {
   const screen = ctx?.getScreenRoot()
-  const fallback = readPersistedPanelWidths()
+  // 实例身份来自装配（M7-6）：持久化键必须带实例段，同页两实例不互相覆盖。
+  const instanceId = ctx?.instanceId ?? 'default'
+  const fallback = readPersistedPanelWidths(instanceId)
   const leftWidth = screen?.layout.leftWidth ?? ref(fallback.leftWidth)
   const rightWidth = screen?.layout.rightWidth ?? ref(fallback.rightWidth)
   const dragging = ref(false)
@@ -44,8 +46,8 @@ export function usePanelResize(ctx?: Context): PanelResizeState {
 
   function onUp(): void {
     if (!activeDrag) return
-    if (activeDrag === 'left') writePersistedPanelWidth('left', leftWidth.value)
-    else writePersistedPanelWidth('right', rightWidth.value)
+    if (activeDrag === 'left') writePersistedPanelWidth(instanceId, 'left', leftWidth.value)
+    else writePersistedPanelWidth(instanceId, 'right', rightWidth.value)
     activeDrag = null
     dragging.value = false
     document.removeEventListener('pointermove', onMove)

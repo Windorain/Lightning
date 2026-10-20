@@ -12,7 +12,8 @@ import com.lightning.mod.client.controlplane.core.Tier;
  * <h2>语义</h2>
  * <ul>
  * <li>{@code begin} 之后<b>一切世界写动作</b>（{@code world.rebuild}/{@code world.snapshot}/
- * {@code world.rollback} 以及 {@code case.run} 的 build 段）被拒 {@code CP-STATE-001}；</li>
+ * {@code world.rollback}、{@code case.run} 的 build 段，以及 #99 的六个 {@code scene.*} L0 原语）
+ * 被拒 {@code CP-STATE-001}；</li>
  * <li>重复 {@code begin} 也是 {@code CP-STATE-001}（不做隐式续期：否则「谁开的会话」再也说不清）；</li>
  * <li>未 {@code begin} 的 {@code end} <b>幂等成功</b>（返回值里如实标注 {@code idempotent:true}
  * 并保留 {@code previous} 快照）；</li>

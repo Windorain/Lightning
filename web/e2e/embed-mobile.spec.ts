@@ -56,7 +56,7 @@ test.describe('embed mobile adaptation', () => {
     expect(sidebarBox?.width ?? 999).toBeLessThanOrEqual(46)
   })
 
-  test('mobile: visual acceptance screenshot', async ({ page }, testInfo) => {
+  test('mobile: visual acceptance screenshot', { tag: '@smoke' }, async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== 'mobile-chrome', 'mobile-only')
 
     await waitEmbedReady(page)
@@ -166,11 +166,11 @@ test.describe('embed mobile adaptation', () => {
 
     await expect(page.locator('.wm-root.wsr-layout-narrow, .wm-root.wsr-layout-tiny')).toBeVisible()
     await expect(page.locator('.wm-titlebar button[title="复位视角"]')).toBeHidden()
-    await expect(page.locator('.wm-titlebar button[title="截屏"]')).toBeHidden()
+    await expect(page.locator('.wm-titlebar button[title^="截屏"]')).toBeHidden()
     await expect(page.locator('.wm-titlebar button[title="全屏"]')).toBeVisible()
   })
 
-  test('desktop: no scale, desktop layout', async ({ page }, testInfo) => {
+  test('desktop: no scale, desktop layout', { tag: '@smoke' }, async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== 'desktop-chrome', 'desktop-only')
 
     await page.goto(PAGE)
@@ -184,5 +184,11 @@ test.describe('embed mobile adaptation', () => {
     expect(scale).toBeNull()
 
     await expect(page.locator('.wm-root')).toHaveClass(/wsr-layout-desktop/)
+    // M6-6/E1：截屏按钮的文案必须**明示例外性质**（"当前画面，非正式导出"），
+    // 不能只靠文件名前缀让用户猜它是正式导出还是即兴抓屏。
+    await expect(
+      page.locator('.wm-titlebar button[title^="截屏"]'),
+      '截屏按钮必须可见，且 title 明示"当前画面，非正式导出"',
+    ).toHaveAttribute('title', '截屏（当前画面，非正式导出）')
   })
 })

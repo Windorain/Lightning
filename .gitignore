@@ -49,3 +49,10 @@ scripts/acceptance/.out/
 
 # P1.8 部件验收的归档与日志（可再生；oracle/ 为 P2.5 消费交付物，须入库不忽略）
 scripts/parts-acceptance/.out/
+
+# #102 控制面导出验收的证据落点 + esbuild 临时捆绑（可再生）
+scripts/control-plane/.out/
+
+# 验收判据的 Python 缓存（可再生；旧的 .pyc 已从版本库移除）
+__pycache__/
+*.pyc

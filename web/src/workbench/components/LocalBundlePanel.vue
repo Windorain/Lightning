@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 
-import { listDevSceneIds } from '@/dev/devScenes'
+import { displayNameOfScene, listDevSceneIds } from '@/dev/devScenes'
 import { DEFAULT_PREVIEW_SCENE_ID } from '@/viewer/viewerSession'
 import { useContext } from '@/runtime/context'
 const ctx = useContext()
@@ -23,7 +23,7 @@ async function load(): Promise<void> {
   lastErr.value = ''
   try {
     await ctx.getOperators().exec('OPERATOR_LOAD_BUILTIN', { sceneId: selectedId.value })
-    ctx.log.setStatus(`已加载示例 ${selectedId.value}`)
+    ctx.log.setStatus(`已加载示例 ${displayNameOfScene(selectedId.value)}`)
   } catch (e) {
     lastErr.value = e instanceof Error ? e.message : String(e)
   } finally {
@@ -40,7 +40,7 @@ async function load(): Promise<void> {
     <label class="dash-field">
       <span class="dash-field__label">场景 ID</span>
       <select v-model="selectedId" class="dash-select">
-        <option v-for="id in ids" :key="id" :value="id">{{ id }}</option>
+        <option v-for="id in ids" :key="id" :value="id">{{ displayNameOfScene(id) }}</option>
       </select>
     </label>
 

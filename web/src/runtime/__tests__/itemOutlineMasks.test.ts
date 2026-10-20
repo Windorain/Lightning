@@ -10,13 +10,16 @@
  * 同口径的最小手工实例（无替身：RuntimeDocument 是真解析产物）。
  */
 import { describe, expect, it } from 'vitest'
-import { ref, shallowRef, type ShallowRef } from 'vue'
+// #301 P10f D3：`ref` 随手工替身一起移除（改走 `makeKernelReadHost` 的真 `Context`）。
+import { shallowRef, type ShallowRef } from 'vue'
 import * as THREE from 'three'
 import { RuntimeDocument } from '@/context/runtimeDocument'
 import { currentFrameKey, getBlockGeometry, getPartMaskGeometry, gridCenterWorld } from '@/context/queries'
 import { buildItemHitIndexFromIndex, type ItemIndex } from '@/pure/itemIndex'
 import { createEmbedItemOutlineMasks } from '@/runtime/embedItemOutline'
 import type { Context } from '@/runtime/context'
+// #301 P10f D3：手工替身换成**真 `Context`**（见 `pickPart.test.ts` 的同款说明）。
+import { makeKernelReadHost } from '@/runtime/__tests__/kernelReadTestHost'
 import type { StructureDefinition } from '@/render/schema/types'
 
 import ae2Fixture from '../../../e2e/fixtures/parts-ae2-multibox.v2.json'
@@ -24,10 +27,12 @@ import ae2Fixture from '../../../e2e/fixtures/parts-ae2-multibox.v2.json'
 type Json = Record<string, unknown>
 
 function ctxFor(doc: RuntimeDocument): Context {
-  return {
-    getDoc: () => ref(doc),
-    getCurrentFrameIndex: () => ref(0),
-  } as unknown as Context
+  // #301 P10f D3：`getDoc()` 已终删 ⇒ 用**真 `Context`**（生产读面本体）。
+  // ⚠️ 这是**正确的摩擦**：生产读面变了，替身必须同步 —— 若替身缺 `kernelGrid`，
+  // 会以 `is not a function` 判红，而不是静默读到空网格（后者会让判据空转）。
+  const ctx = makeKernelReadHost(doc).ctx
+  // `getFrameIndex` 是**时间面**（不属本组读面）⇒ 手工补一位（本组只用帧 0）。
+  return Object.assign(ctx, { getFrameIndex: () => 0 }) as Context
 }
 
 /** 运行时定义形态（同生产）：文档根字段 + 首帧 structure 展开到同一对象 */

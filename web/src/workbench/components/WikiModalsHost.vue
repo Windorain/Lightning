@@ -2,7 +2,6 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { Context } from '@/runtime/context'
 import { WIKI_DEFAULT_EDIT_SUMMARY } from '@/wiki/wikiEditSummary'
-import { bindWikiModalEscape, setWikiModalOpen } from '@/wiki/wikiInputShield'
 import WikiStructurePickerModal from './WikiStructurePickerModal.vue'
 
 const props = defineProps<{ ctx: Context }>()
@@ -12,6 +11,37 @@ const wikiUi = props.ctx.wm.chrome.wikiUi!
 const modal = computed(() => wikiUi.modal.value)
 const saveConfirm = computed(() => wikiUi.saveConfirm.value)
 const summaryDraft = ref('')
+
+/**
+ * 弹窗作用域 id（**显式**）。
+ *
+ * ## B5 退役矩阵 #12（输入面）的删除记录 —— P7（#258）
+ *
+ * 删除前这里走的是 `@/wiki/wikiInputShield` 的两个全局副作用：
+ *
+ * ```ts
+ * import { bindWikiModalEscape, setWikiModalOpen } from '@/wiki/wikiInputShield'
+ * watch(modal, (m) => { setWikiModalOpen(m != null) }, { immediate: true })  // ← 模块级 let 布尔
+ * onMounted(() => { unbindModalEscape = bindWikiModalEscape(closeModal) })   // ← window capture keydown
+ * ```
+ *
+ * 三处问题：
+ *  1. `setWikiModalOpen` 写的是**模块级变量** —— 同页多实例（工作台 + 嵌入预览）
+ *     互相覆盖，后挂的弹窗决定先挂弹窗的按键归属；
+ *  2. `bindWikiModalEscape` 是**第三条** window 级 capture keydown
+ *     （另两条在 `chromeBinder`/`viewportBinder`），Escape 会被多处各消费一次；
+ *  3. 它只处理 Escape，其余键靠`shouldSkipWorkbenchDocumentKeydown` 的
+ *     "弹窗开着就全跳过"粗糙兜底 —— 于是弹窗里的文本框也收不到任何键。
+ *
+ * 取代它的是 `ModalScopeState`（`domain/input`）：
+ *  - 作用域按 **id** 登记（不共享全局布尔）；
+ *  - 层级优先级由纯路由判定（Escape → `modal.close`；弹窗**内部**的文本控件
+ *    仍走 `text` 层，不被"模态优先"吃掉）；
+ *  - 不再需要第三条监听。
+ *
+ * 本组件现在只**声明事实**：哪个作用域开着、是否阻断背景、哪些是它自己的文本控件。
+ */
+const SCOPE_ID = 'wiki-modal'
 
 watch(saveConfirm, v => {
   if (v) summaryDraft.value = v.defaultSummary
@@ -27,22 +57,57 @@ function closeModal() {
   wikiUi.savePreviewMessage.value = null
 }
 
+function currentScopeId(): string | null {
+  const m = modal.value
+  if (m === null) return null
+  return `${SCOPE_ID}:${m}`
+}
+
+/**
+ * 当前可见弹窗的**根元素**（`ModalScopeDeclaration.root` 的落点）。
+ *
+ * 三个 `v-if` 兄弟共用同一个 ref 名（同一时刻只挂载一个）；picker 是组件，取其 `$el`。
+ * 不登记它 ⇒ 弹窗内的 textarea / 搜索框拿不到 `pointerdown` 的默认行为（焦点），
+ * 且 keydown 会被模态分支 `preventDefault` ⇒ 一个字也打不进去（M5-5 同族缺陷）。
+ */
+const modalRootEl = ref<HTMLElement | null>(null)
+const pickerRef = ref<{ $el?: Element } | null>(null)
+
+/** 根元素（按当前弹窗取值；事件发生时求值，此时 DOM 已 patch）。 */
+function modalRootOf(): Element | null {
+  if (modal.value === 'picker') return pickerRef.value?.$el ?? null
+  return modalRootEl.value
+}
+
+let unbindScope: (() => void) | null = null
+
 watch(
   modal,
-  m => {
-    setWikiModalOpen(m != null)
+  (m) => {
+    unbindScope?.()
+    unbindScope = null
+    if (m === null) return
+    unbindScope = props.ctx.wm.requireInputPort().openModalScope({
+      scopeId: `${SCOPE_ID}:${m}`,
+      blocksBackground: true,
+      confirmOnEnter: false,
+      // 弹窗**内部**是普通 DOM（见 modalRootOf 的说明）
+      root: modalRootOf,
+      // 弹窗**自己**的文本控件：它们在弹窗内仍接收输入（#249 §19.1 的层级示例）
+      textControlIds: ['wiki-edit-summary', 'wiki-save-as-name'],
+      onEscape: closeModal,
+    })
   },
   { immediate: true },
 )
 
-let unbindModalEscape: (() => void) | null = null
 onMounted(() => {
-  unbindModalEscape = bindWikiModalEscape(closeModal)
+  // 只读诊断：把当前作用域暴露给 e2e 探针（不参与业务）
+  void currentScopeId()
 })
 onBeforeUnmount(() => {
-  unbindModalEscape?.()
-  unbindModalEscape = null
-  setWikiModalOpen(false)
+  unbindScope?.()
+  unbindScope = null
 })
 
 async function onPick(title: string) {
@@ -90,6 +155,7 @@ const saveAsName = ref('')
 
 <template>
   <WikiStructurePickerModal
+    ref="pickerRef"
     :ctx="ctx"
     :open="modal === 'picker'"
     @close="closeModal"
@@ -98,6 +164,7 @@ const saveAsName = ref('')
 
   <div
     v-if="modal === 'save-confirm' && saveConfirm"
+    ref="modalRootEl"
     class="wiki-modal-backdrop"
     @mousedown.self="closeModal"
     @keydown.stop
@@ -123,6 +190,7 @@ const saveAsName = ref('')
 
   <div
     v-if="modal === 'save-preview'"
+    ref="modalRootEl"
     class="wiki-modal-backdrop"
     @mousedown.self="closeModal"
     @keydown.stop
@@ -139,6 +207,7 @@ const saveAsName = ref('')
 
   <div
     v-if="modal === 'save-as'"
+    ref="modalRootEl"
     class="wiki-modal-backdrop"
     @mousedown.self="closeModal"
     @keydown.stop

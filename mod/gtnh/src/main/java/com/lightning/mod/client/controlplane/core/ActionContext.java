@@ -63,6 +63,28 @@ public final class ActionContext {
     }
 
     /**
+     * 派生一个「换参数、其余全共享」的上下文（v1.3，issue #98 的用例 {@code read} 段用）。
+     *
+     * <p>
+     * 用例的 {@code read} 段要执行读面动作，但每次读面有自己的 {@code params}；同时读面产出的
+     * 产物必须落<b>用例的 run 目录</b>（否则判据段看不到读数）。因此派生上下文共享
+     * job / artifacts / events / logger / <b>已开的 run</b>，只换 {@link #params()}。
+     *
+     * <p>
+     * 为什么要一个显式方法而不是让调用方自己 new：{@link ActionContext} 是 final 且构造器包私有，
+     * 而「run 共享」这件事必须由本类保证——派生上下文如果拿不到 run，
+     * 读面动作会各自 {@code beginRun} 开新 run，产物就散到别的目录里去了（实测这类缺陷表现为
+     * 「判据段找不到 read/*.json」，而读面调用本身是绿的）。
+     *
+     * @param newParams 新参数（null 视为空对象）
+     */
+    public ActionContext withParams(JsonObject newParams) {
+        ActionContext c = new ActionContext(job, newParams, artifacts, events, logger);
+        c.run = this.run;
+        return c;
+    }
+
+    /**
      * 开始一次 run（幂等）：建 run 目录并登记活动 run。
      *
      * <p>
@@ -170,14 +192,26 @@ public final class ActionContext {
         return Json.optBool(params, name, def);
     }
 
-    /** 取整数参数，缺失或类型不符用默认值。 */
+    /**
+     * 取整数参数（{@code TYPE_INT} 语义，<b>严格</b>）：缺失或显式 {@code null} 用默认值；
+     * 非整数数值（{@code 1.5}）、布尔、字符串（{@code "3"}）、超 int 范围一律 {@code CP-VALID-002}
+     * 并逐字段说明「收到的值与类型、期望类型、hint」。
+     *
+     * <p>
+     * <b>Gitea #131 的落点</b>：改造前这里走 gson 的宽松取值（{@code 1.5 → 1}、{@code "3" → 3}、
+     * {@code true → 1}，都不抛异常），于是「调用方写 1.5、动作按 1 执行」没有任何提示。本仓一切
+     * {@code TYPE_INT} 参数都经本方法（或 {@link Json#strictInt}）取值 ⇒ 收紧点只有一处，
+     * 全动作面机械可验。接受/拒绝对照表见 {@code docs/control-plane/contract.md} §2.1。
+     */
     public int optInt(String name, int def) {
-        return Json.optInt(params, name, def);
+        return Json.strictInt(params, name, def);
     }
 
-    /** 取长整数参数，缺失或类型不符用默认值。 */
+    /**
+     * 取长整数参数；口径与 {@link #optInt} 相同（同样不做截断/解析/布尔转换，见 Gitea #131）。
+     */
     public long optLong(String name, long def) {
-        return Json.optLong(params, name, def);
+        return Json.strictLong(params, name, def);
     }
 
     /** 取对象参数；必填缺失或类型不符抛 CP-VALID-002。 */

@@ -245,6 +245,25 @@ export async function clickStatsRow(
  *
  * 悬停后等一拍让 tooltip 渲染与 clamp 落定（同 `probeHover` 的 tooltip 等待口径）。
  */
+/**
+ * 物品行图标的**作用域化**选择器（P6 审计的 must-fix #2）。
+ *
+ * ## 为什么必须限定到 `.wb-wiki-embed`
+ *
+ * 旧写法 `[data-stats-icon-hover="${key}"]` 是**全文档**选择器，而
+ * `locator.dispatchEvent()` 是 **strict** 的（两个匹配 ⇒ strict mode violation）。
+ * 更危险的是"只有一个匹配但它在**已卸载/隐藏**的嵌入里"：
+ * 派发成功、无报错，但事件落在死节点上 ⇒ 悬停态从未建立。
+ *
+ * P6 把工作台的 `v-show` 保活改成显式生命周期后，"另一个外壳里的同名节点"
+ * 从"一直存在但隐藏"变成"只在活动时存在"——判据的**输入**变了，
+ * 故这里把作用域显式化：问的是"**Wiki 嵌入里**的那个图标"。
+ */
+function statsIconHover(key: string): string {
+  return `${WIKI_EMBED} [data-stats-icon-hover="${key}"]`
+}
+
+/** 悬停物品行的**图标**（触发区收窄后唯一应出 Tooltip 的区域）。 */
 export async function hoverStatsRow(
   page: Page,
   key: string,
@@ -259,7 +278,7 @@ export async function hoverStatsRow(
     timeout,
   )
   await waitStatsSidebarStable(page, 500, timeout)
-  const loc = page.locator(`[data-stats-icon-hover="${key}"]`)
+  const loc = page.locator(statsIconHover(key))
   await loc.dispatchEvent('pointerenter', { clientX: 40, clientY: 200, bubbles: true })
   await loc.dispatchEvent('pointermove', { clientX: 40, clientY: 200, bubbles: true })
   await page.waitForTimeout(180)
@@ -284,7 +303,7 @@ export async function hoverStatsRowText(page: Page, key: string, timeout = 15_00
 
 /** 离开物品行图标（清 hover 态；tooltip 随之消失）。 */
 export async function leaveStatsRow(page: Page, key: string): Promise<void> {
-  await page.locator(`[data-stats-icon-hover="${key}"]`).dispatchEvent('pointerleave', { bubbles: true })
+  await page.locator(statsIconHover(key)).dispatchEvent('pointerleave', { bubbles: true })
   await page.waitForTimeout(120)
 }
 

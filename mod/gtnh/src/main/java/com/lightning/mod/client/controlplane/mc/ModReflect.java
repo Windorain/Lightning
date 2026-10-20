@@ -12,7 +12,7 @@ import java.lang.reflect.Method;
  * 见 {@code dependencies.gradle}）——写 {@code import logisticspipes...} 直接编译失败；</li>
  * <li><b>AE2</b> 虽然对 GT5U 继承链有 {@code compileOnly} 依赖，但整合包里可以没有 AE2：硬 import 会在
  * 类加载期抛 {@link NoClassDefFoundError}，连「注册动作本身」都炸。既有部件探针
- * （{@code meshcapture.parts.probe.Ae2PartProbe}）同样一律反射，本类沿用该口径。</li>
+ * （{@code meshcapture.parts.probe.Ae2PartProbe}，已随 Gitea #104 删除）同样一律反射，本类沿用该口径。</li>
  * </ol>
  *
  * <p>

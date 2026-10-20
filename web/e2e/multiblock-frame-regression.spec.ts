@@ -2,7 +2,7 @@
  * T2.6 · 「帧为主」文档回归断言（计划 §5 Phase 3 / T3.4 复用）。
  *
  * 覆盖：帧播放与分层预览语义不变 ——
- *  - 帧切换由 **DOM 事件**驱动（滑杆 `change` / 键盘），且 `ctx.getCurrentFrameIndex()`
+ *  - 帧切换由 **DOM 事件**驱动（滑杆 `change` / 键盘），且 `ctx.getFrameIndex()`
  *    随之变化（「doc 当前帧变化」）；
  *  - 播放按钮 → 索引随时间推进；暂停 → 索引停住；
  *  - 分层预览开关行为：`ALL`(-1) ↔ 单层 `Y = n`，且**几何真的变了**（像素签名判据）；
@@ -66,7 +66,7 @@ test.describe('T2.6 · 帧为主文档回归（帧播放 / 分层预览语义）
     expect(doc.channelCount).toBe(0)
     expect(doc.runstateCount).toBe(0)
     expect(doc.variantCount).toBe(0)
-    expect(doc.multiblockFrameCount).toBe(0)
+    expect(doc.multiblockSceneCount, '帧为主文档没有多方块场景声明').toBe(0)
     expect(doc.frameCount).toBe(FRAME_COUNT)
     expect(
       doc.frameGrids.map((f) => [f.d, f.h, f.w, f.solidCells]),
@@ -138,7 +138,7 @@ test.describe('T2.6 · 帧为主文档回归（帧播放 / 分层预览语义）
     await playBtn.click()
     await expect(playBtn).toHaveAttribute('aria-pressed', 'true')
     await page.waitForFunction(
-      () => (window as any).__vm__.getCurrentFrameIndex().value !== 0,
+      () => (window as any).__vm__.getFrameIndex() !== 0,
       undefined,
       { timeout: 15_000 },
     )

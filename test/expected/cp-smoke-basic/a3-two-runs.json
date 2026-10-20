@@ -1,0 +1,38 @@
+{
+  "schema": "lightning.cp-a3-evidence/1",
+  "caseId": "cp-smoke-basic",
+  "caseSha256": "f7bf109f550d20ae939e29c1931f7369ddbfafe353a34fb516c44eac5a60791d",
+  "assertion": "A3：同一固定程序执行两次，产物结构一致（按 docs/control-plane/case-file.md §10 的成文口径）",
+  "conclusion": "green",
+  "a": {
+    "runId": "20261007-083955-cp-smoke-basic-3",
+    "overall": "green",
+    "criteriaOverall": "green",
+    "evidenceOverall": "green",
+    "criteriaCounts": { "green": 4, "red": 0, "error": 0 },
+    "artifactCount": 14
+  },
+  "b": {
+    "runId": "20261007-084002-cp-smoke-basic-4",
+    "overall": "green",
+    "criteriaOverall": "green",
+    "evidenceOverall": "green",
+    "criteriaCounts": { "green": 4, "red": 0, "error": 0 },
+    "artifactCount": 14
+  },
+  "comparison": {
+    "tool": "test/expected/compare-runs.mjs",
+    "invocation": "node test/expected/compare-runs.mjs --a <runA> --b <runB> --json-out temp/cp-assets/evidence/a3-smoke-compare.json",
+    "exitCode": 0,
+    "same": 14,
+    "different": 0,
+    "overall": "green",
+    "machineReadable": "temp/cp-assets/evidence/a3-smoke-compare.json"
+  },
+  "_scopeNote": "本用例是**冒烟探针**（判据 4 条，无 cameras/read/action 段），因此它的 A3 主要覆盖「世界重建 + build 段 + 段记账」这条最基础的链路——是最快的一条「设施还活着吗」的 A3 证据。它按 taxonomy 草案 §8-3 **不建 expected/ 基准**（判据太弱，基准会是空壳）。",
+  "evidenceFiles": [
+    "temp/cp-assets/evidence/a3-smoke-compare.json",
+    "temp/cp-assets/evidence/smoke-a3-1.json",
+    "temp/cp-assets/evidence/smoke-a3-2.json"
+  ]
+}

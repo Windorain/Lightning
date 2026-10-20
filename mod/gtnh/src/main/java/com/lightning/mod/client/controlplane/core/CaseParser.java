@@ -42,6 +42,9 @@ public final class CaseParser {
         "label",
         "world",
         "build",
+        "read",
+        "action",
+        "export",
         "capture",
         "cameras",
         "criteria",
@@ -65,6 +68,29 @@ public final class CaseParser {
 
     /** 判据条目的允许字段。 */
     public static final Set<String> CRITERION_FIELDS = unmodifiable("id", "type", "params", "expect");
+
+    /** {@code read} 段步骤的允许字段（v1.3，issue #98）。 */
+    public static final Set<String> READ_STEP_FIELDS = unmodifiable("action", "params", "path", "role");
+
+    /**
+     * {@code action} 段步骤的允许字段（v1.6，issue #103；v1.8 / G1 起增 {@code holdTicks}）。
+     *
+     * <p>
+     * {@code holdTicks} 是<b>步骤对象顶层</b>的编排属性（input-contract.md §9.2 第 1 条 / D-3），
+     * 与 {@code params} 并列：跨 tick 是<b>编排</b>的事，不是动作参数的事。因此它不是
+     * 「动作参数里的一个键」，而是步骤字段——在这里开白名单，在 {@link CaseValidator} 判取值域
+     * 与适用性（本类只做「字段名/类型」那一半，见类注释的分工）。
+     */
+    public static final Set<String> ACTION_STEP_FIELDS = unmodifiable(
+        "action",
+        "params",
+        "path",
+        "role",
+        "expect",
+        "holdTicks");
+
+    /** {@code export} 段步骤的允许字段（v1.7，Gitea #102）。 */
+    public static final Set<String> EXPORT_STEP_FIELDS = unmodifiable("action", "params");
 
     /** 变体条目的允许字段。 */
     public static final Set<String> VARIANT_FIELDS = unmodifiable("id", "mutate", "expectCriteriaRed");
@@ -167,6 +193,9 @@ public final class CaseParser {
 
         CaseFile.World world = parseWorld(o, fields, warnings);
         List<CaseFile.Step> build = parseBuild(o, world, fields, warnings);
+        List<CaseFile.ReadStep> read = parseRead(o, fields, warnings);
+        List<CaseFile.ActionStep> action = parseAction(o, fields, warnings);
+        List<CaseFile.ReadStep> export = parseExport(o, fields, warnings);
         JsonElement capture = parseCapture(o, fields, warnings);
         JsonArray cameras = parseCameras(o, fields, warnings);
         List<CaseFile.Criterion> criteria = parseCriteria(o, fields, warnings);
@@ -190,6 +219,9 @@ public final class CaseParser {
             label,
             world,
             build,
+            read,
+            action,
+            export,
             capture,
             cameras,
             criteria,
@@ -432,6 +464,178 @@ public final class CaseParser {
             }
         }
         return Json.copyArray(cameras);
+    }
+
+    /**
+     * 解析 {@code read} 段（v1.3，issue #98）：读面步骤清单。
+     *
+     * <p>
+     * 每步 {@code {action:"read.blocks", params:{…}, path:"read/blocks.json", role?}}：
+     * 执行该读面动作，把结果 JSON 落 run 目录的 {@code path} 并登记为产物。
+     * 「读面输出可被判据直接引用」（需求书 §10 B2）的物质基础就是这一段——
+     * 没有它，读面只能由调用方在用例之外单独调，判据永远看不到读数。
+     *
+     * <p>
+     * 这里只做「须为 array + 元素须为 object + 未知字段」，字段级校验（动作名必须已注册且是
+     * {@code read.*}、path 合法且不与既有产物冲突）在 {@link CaseValidator}。
+     *
+     * @return 原样深拷的读面步骤；未声明返回空列表（不是 null：调用方按「段为空」处理）
+     */
+    private List<CaseFile.ReadStep> parseRead(JsonObject o, Fields fields, List<String> warnings) {
+        List<CaseFile.ReadStep> out = new ArrayList<CaseFile.ReadStep>();
+        if (!o.has("read")) {
+            return out;
+        }
+        JsonArray arr = Json.optArray(o, "read");
+        if (arr == null) {
+            fields.add("read", "须为 array（读面步骤 [{action,params?,path,role?}]）");
+            return out;
+        }
+        for (int i = 0; i < arr.size(); i++) {
+            String ctx = "read[" + i + "]";
+            JsonElement e = arr.get(i);
+            if (e == null || !e.isJsonObject()) {
+                fields.add(ctx, "步骤须为 object {action,params?,path,role?}");
+                continue;
+            }
+            JsonObject step = e.getAsJsonObject();
+            checkUnknown(step, READ_STEP_FIELDS, ctx, fields, warnings);
+            String action = stringOf(step, "action", ctx + ".action", fields);
+            if (action == null) {
+                fields.add(ctx + ".action", "必填（读面动作名，如 read.blocks）");
+            }
+            String path = stringOf(step, "path", ctx + ".path", fields);
+            if (path == null) {
+                fields.add(ctx + ".path", "必填（run 目录内相对路径，如 read/blocks.json）");
+            }
+            JsonObject params = Json.optObject(step, "params");
+            if (step.has("params") && params == null) {
+                fields.add(ctx + ".params", "须为 object");
+            }
+            String role = stringOf(step, "role", ctx + ".role", fields);
+            out.add(
+                new CaseFile.ReadStep(action, params == null ? new JsonObject() : Json.copyObject(params), path, role));
+        }
+        return out;
+    }
+
+    /**
+     * 解析 {@code export} 段（v1.7，Gitea #102）：导出步骤清单。
+     *
+     * <h2>为什么需要独立一段（C4 同 run 纪律）</h2>
+     *
+     * C4 要求「导出件、实拍、观测记录、世界清单哈希<b>同一 run</b>」。若导出只能在用例之外单独调
+     * {@code export.scene}，它必然落在<b>另一个</b> run 里——那样「同一 run 内世界清单哈希唯一」
+     * 这条判据就永远无法对导出件成立。因此导出必须是用例的一段：跑在 {@code read} 之后、
+     * {@code cameras} 之前（先有世界读数与场景，再导出与拍摄），落进用例自己的 run 目录。
+     *
+     * <p>
+     * 每步 {@code {action:"export.scene", params:{…}}}：动作名限 {@code export.*} 前缀
+     * （与 {@code read} 段限 {@code read.*} 同一思路：段语义靠前缀静态可查）。
+     * 产物路径由动作自己决定（落 run 目录的 {@code export/} 下），故本段<b>不</b>接受 {@code path}
+     * ——避免「声明一个落点而动作写到别处」这种自相矛盾。
+     *
+     * @return 原样深拷的导出步骤；未声明返回空列表
+     */
+    private List<CaseFile.ReadStep> parseExport(JsonObject o, Fields fields, List<String> warnings) {
+        List<CaseFile.ReadStep> out = new ArrayList<CaseFile.ReadStep>();
+        if (!o.has("export")) {
+            return out;
+        }
+        JsonArray arr = Json.optArray(o, "export");
+        if (arr == null) {
+            fields.add("export", "须为 array（导出步骤 [{action,params?}]）");
+            return out;
+        }
+        for (int i = 0; i < arr.size(); i++) {
+            String ctx = "export[" + i + "]";
+            JsonElement e = arr.get(i);
+            if (e == null || !e.isJsonObject()) {
+                fields.add(ctx, "步骤须为 object {action,params?}");
+                continue;
+            }
+            JsonObject step = e.getAsJsonObject();
+            checkUnknown(step, EXPORT_STEP_FIELDS, ctx, fields, warnings);
+            String action = stringOf(step, "action", ctx + ".action", fields);
+            if (action == null) {
+                fields.add(ctx + ".action", "必填（导出动作名，如 export.scene）");
+            }
+            JsonObject params = Json.optObject(step, "params");
+            if (step.has("params") && params == null) {
+                fields.add(ctx + ".params", "须为 object");
+            }
+            out.add(
+                new CaseFile.ReadStep(action, params == null ? new JsonObject() : Json.copyObject(params), null, null));
+        }
+        return out;
+    }
+
+    /**
+     * 解析 {@code action} 段（v1.6，issue #103）：L2 编排步骤清单。
+     *
+     * <p>
+     * 每步 {@code {action:"scene.player.pose", params:{…}, path:"action/0-pose.json", role?, expect?}}：
+     * 执行该动作，把结果 JSON 落 run 目录的 {@code path} 并登记为产物；{@code expect} 非空时
+     * <b>当场</b>按 RFC 6901 指针断言（逐步断言：该步没达成就当场失败，不会拖到 criteria 段才发现）。
+     *
+     * <p>
+     * 这里只做「须为 array + 元素须为 object + 未知字段 + 必填字段形态」；字段级校验
+     * （动作名必须已注册且为同步动作、path 合法且不与既有产物冲突、expect 指针形态）在
+     * {@link CaseValidator}。
+     *
+     * @return 原样深拷的编排步骤；未声明返回空列表（不是 null：调用方按「段为空」处理）
+     */
+    private List<CaseFile.ActionStep> parseAction(JsonObject o, Fields fields, List<String> warnings) {
+        List<CaseFile.ActionStep> out = new ArrayList<CaseFile.ActionStep>();
+        if (!o.has("action")) {
+            return out;
+        }
+        JsonArray arr = Json.optArray(o, "action");
+        if (arr == null) {
+            fields.add("action", "须为 array（编排步骤 [{action,params?,path,role?,expect?}]）");
+            return out;
+        }
+        for (int i = 0; i < arr.size(); i++) {
+            String ctx = "action[" + i + "]";
+            JsonElement e = arr.get(i);
+            if (e == null || !e.isJsonObject()) {
+                fields.add(ctx, "步骤须为 object {action,params?,path,role?,expect?}");
+                continue;
+            }
+            JsonObject step = e.getAsJsonObject();
+            checkUnknown(step, ACTION_STEP_FIELDS, ctx, fields, warnings);
+            String action = stringOf(step, "action", ctx + ".action", fields);
+            if (action == null) {
+                fields.add(ctx + ".action", "必填（任意已注册的同步动作名，如 scene.player.pose / player.place_block）");
+            }
+            String path = stringOf(step, "path", ctx + ".path", fields);
+            if (path == null) {
+                fields.add(ctx + ".path", "必填（run 目录内相对路径，如 action/0-pose.json）");
+            }
+            JsonObject params = Json.optObject(step, "params");
+            if (step.has("params") && params == null) {
+                fields.add(ctx + ".params", "须为 object");
+            }
+            String role = stringOf(step, "role", ctx + ".role", fields);
+            JsonObject expect = Json.optObject(step, "expect");
+            if (step.has("expect") && expect == null) {
+                fields.add(ctx + ".expect", "须为 object {指针: 期望值}（RFC 6901 指针 → 期望值）");
+            }
+            // v1.8 / G1（input-contract.md §9.2 / D-3）：holdTicks 是步骤对象顶层的编排属性，
+            // 这里只**原样承载**（缺失/JSON null 即未声明）。取值域（精确整数、1..1200、只对输入族
+            // 步进动作、不适用字段必须显式拒绝）全部在 CaseValidator 一处判定——同一条规则不在两处分叉。
+            JsonElement holdTicks = Json.get(step, "holdTicks");
+            out.add(
+                new CaseFile.ActionStep(
+                    action,
+                    params == null ? new JsonObject() : Json.copyObject(params),
+                    path,
+                    role,
+                    expect == null ? null : Json.copyObject(expect),
+                    expect != null,
+                    holdTicks == null ? null : Json.copy(holdTicks)));
+        }
+        return out;
     }
 
     private List<CaseFile.Criterion> parseCriteria(JsonObject o, Fields fields, List<String> warnings) {
