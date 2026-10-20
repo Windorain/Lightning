@@ -164,10 +164,22 @@ normalizeEnvelope(raw):     既有 normalizeEnvelopeToPlain（payload base64 →
 2. **竖向动画条整条保留**（既有且正确：`animation` 帧序要靠它）。
 3. 其余原样返回——**字节不变**，故「同一张贴图的多个材质共享一个 blob」的去重口径不受影响。
 4. 裁切是**逐像素搬运，不调用任何缩放 API**：不许重采样。重采样会得到「形状对但糊」的假修复。
-5. **拿不到面号就不裁**（不猜第 0 列）：面号只来自「含 `:面号` 的原始材质键 / sprite 注册名」。
+5. **2 列带按游戏特例取列**：`count == 2` 时列号 = `faceIndex / 6`（不是 `faceIndex % count`）——
+   与 IC2 `BlockTextureStitched.loadSubImage` 的 `count==2` 分支一致（6 面 × inactive/active 各一列）。
+   实测 IC2 2.2.828 的 2 列带只有 `wiring/cable/blockDetectorCable` 与 `blockSplitterCable`（32×16）；
+   `BlockCable` 注册的 subIndex 是 0..5，用 `% 2` 会把 5 个面取到**不存在的第 2 列**。
+   （本批未对电缆做实机取证——判据在 `TextureStripCropTest#twoColumnStripFollowsGameDivideBySixRule`。）
+6. **拿不到面号就不裁**（不猜第 0 列）：面号只来自「含 `:面号` 的原始材质键 / sprite 注册名」。
    ⚠ 归一化后的 locator **没有面号**——`ExportTextureLocator.stripWorldMetaSuffixInPathForBundle`
    把 path 尾段的 `:0..15` 当世界 meta 剥掉了（`ic2:generator/blockNuclearReactor:3` →
    `ic2:blocks/generator/blockNuclearReactor`），这是 #9 的成因之一，不是可用的面号来源。
+
+**IC2 2.2.828 jar 的带形态全量（blocks 空间 423 张贴图）**：竖向多帧 **18 张，全部是流体**
+（`fluids/*_still` 16×512、`*_flow` 32×1024）；2 列横带 **2 张**（`wiring/cable/blockDetectorCable`、
+`blockSplitterCable` 32×16）；≥6 列横带 **89 张**（如 `blockBarrel`、`blockNuke`）。
+`.mcmeta` 全量 21 个文件 = 上述 18 张流体 + 2 张**物品**贴图（`itemNanoSaber.active` / `plasmaLauncher`）
++ `pack.mcmeta` ⇒ **方块面贴图没有任何 mcmeta**，即 `BlockTextureStitched` 的 `animationLength` 分支
+（要求 `frameHeight > 0`）在方块面上永远不会走到，「竖向动画的方块面」在 IC2 里不存在。
 
 **为什么不是「把 UV 乘 32/384」**：那只对「恰好 12 面、且第 0 列就是这一面」成立，对 6 面的
 chamber、对任何 `subIndex ≠ 0` 的面全错，且掩盖了「取错素材」这个事实（Gitea #9 侦察报告 §7 方案 D）。
