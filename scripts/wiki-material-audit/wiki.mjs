@@ -6,9 +6,9 @@
  * 交互式挑战拦下（HTTP 403 + cf-mitigated: challenge）**。实测带上团队共享的
  * X-authkey 后 API 正常返回 200，因此本工具只支持「从环境变量取 key」这一条路：
  *
- *     $env:HUIJI_AUTHKEY = "..."     # 值来自 resources/secrets/huiji-wiki.env，禁止入库
+ *     $env:HUIJI_AUTHKEY = "..."     # 团队共享 key，向 Wiki 维护者索取；禁止入库
  *
- * 纪律（任务书硬约束）：
+ * 纪律：
  *   - 只发 GET / query / parse 这类读请求，从不 POST，从不写；
  *   - 相邻请求最小间隔默认 1000ms（可 --min-interval 调大，不允许调小到 0）；
  *   - 分页用 API 的 continue 游标，不猜页码；

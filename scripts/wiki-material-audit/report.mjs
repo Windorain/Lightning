@@ -41,17 +41,19 @@ export function renderMarkdown(result) {
   lines.push('| 含挂载的页面 | ' + s.pagesWithMounts + ' 页（共 ' + s.mounts + ' 个挂载点） |')
   lines.push('| 命中页面 | **' + s.pagesBad + ' 页** |')
   lines.push('| 被引用结构 | ' + s.structuresReferenced + ' 个（审计 ' + s.structuresAudited + ' 个） |')
-  lines.push('| #87 型坏 blob | **' + s.hits87 + '** |')
-  lines.push('| #9 型坏 blob | **' + s.hits9 + '** |')
+  lines.push('| 缺失材质占位图 blob | **' + s.hitsMissingTexture + '** |')
+  lines.push('| IC2 横向多面带 blob | **' + s.hitsFaceStrip + '** |')
   lines.push('| 未判型 | ' + s.unclassified + ' 条 |')
   lines.push('| 无法解析 | ' + s.structuresUnresolved + ' 个结构 / ' + s.pagesUnresolved + ' 页 |')
   lines.push('')
 
-  lines.push('## 判据（复用既有判型，未重新发明）')
+  lines.push('## 判据')
   lines.push('')
-  lines.push('- **#87 占位图**：blob 为 16x16、颜色数 <= 4、洋红像素占比 > 10%、纯黑像素占比 > 10%。')
-  lines.push('- **#9 横向多面带**：blob 为 384x32 或 192x32，且材质 locator 是 IC2 系（ic2: 或 ic2/ 前缀）。')
-  lines.push('- **未判型**：横向带但非 IC2（或宽度不是 384/192）、像占位图但未达 #87 门槛、贴图解码失败。')
+  lines.push('- **missingTexture（缺失材质占位图）**：贴图 16x16、颜色数 <= 4、洋红像素占比 > 10%、纯黑像素占比 > 10%。')
+  lines.push('  这是 Minecraft 缺失材质的典型外观；命中说明导出时材质没解析出来，页面上会显示成黑/洋红棋盘。')
+  lines.push('- **ic2FaceStrip（IC2 横向多面带）**：贴图 384x32 或 192x32（H=32、W=N*32），且材质 locator 是 IC2 系（ic2: 或 ic2/ 前缀）。')
+  lines.push('  IC2 把多个面横向排进一张 PNG，导出器若把整条带当成一个面，就会把 N 个面压进同一个面。')
+  lines.push('- **未判型**：横向带但非 IC2（或宽度不是 384/192）、像占位图但未达 missingTexture 门槛、贴图解码失败。')
   lines.push('')
   lines.push('命中口径：坏 blob 必须被**实际出现在 cellGrid 里的方块**引用才算结构命中（status=bad）；')
   lines.push('坏 blob 存在但没被用到，只记警告（status=warn），不冤枉页面。')
@@ -70,7 +72,7 @@ export function renderMarkdown(result) {
   lines.push('## 命中页面（' + badPages.length + ' 页 / ' + badPairs + ' 个页面-结构对）')
   lines.push('')
   if (!badPages.length) {
-    lines.push('本次清点没有页面命中 #87 / #9。')
+    lines.push('本次清点没有页面命中坏材质。')
   } else {
     lines.push('| 页面 | 命名空间 | 结构 | 判型 | 坏 blob 数 |')
     lines.push('| --- | --- | --- | --- | --- |')
@@ -79,8 +81,8 @@ export function renderMarkdown(result) {
         const structure = findStructure(result, mount.structureTitle)
         if (!structure || structure.status !== 'bad') continue
         const kinds = []
-        if (structure.hits87) kinds.push('#87 x' + structure.hits87)
-        if (structure.hits9) kinds.push('#9 x' + structure.hits9)
+        if (structure.hitsMissingTexture) kinds.push('missingTexture x' + structure.hitsMissingTexture)
+        if (structure.hitsFaceStrip) kinds.push('ic2FaceStrip x' + structure.hitsFaceStrip)
         lines.push(
           '| ' + cell(page.title) + ' | ' + page.ns + ' | ' + cell(mount.name) + ' | ' + kinds.join(' + ') + ' | ' +
             structure.badBlobs.length + ' |',
@@ -190,8 +192,8 @@ function collectBlockUsers(structure) {
 }
 
 function labelVerdict(verdict) {
-  if (verdict === 'placeholder87') return '#87 占位图'
-  if (verdict === 'strip9') return '#9 横向带'
+  if (verdict === 'missing-texture') return '缺失材质占位图'
+  if (verdict === 'ic2-face-strip') return 'IC2 横向多面带'
   if (verdict === 'unclassified') return '未判型'
   if (verdict === 'error') return '解码失败'
   return verdict

@@ -2,7 +2,7 @@
  * audit.test.mjs —— 整条命令的离线端到端判据（本地假 MediaWiki，不碰真站）
  * ============================================================================
  * 为什么值得写：判型函数各自绿，不代表「一条命令跑完能产出报告」。这里用 node:http
- * 起一个只会 query 的假站点，喂给 runAudit 一份含 #87 命中的最小数据集，断言：
+ * 起一个只会 query 的假站点，喂给 runAudit 一份含 missingTexture 命中的最小数据集，断言：
  *   - 命令真的枚举到了 Data 页与嵌入页；
  *   - 报告 JSON/Markdown 都落盘，读数与命中的页面/结构对得上；
  *   - 分片页标题用空格时，能审出来但必须如实标注「客户端命名对不上」。
@@ -118,7 +118,7 @@ function readJson(file) {
   return JSON.parse(fs.readFileSync(file, 'utf8'))
 }
 
-test('端到端：#87 命中页面写进 JSON 与 Markdown', async () => {
+test('端到端：missingTexture 命中页面写进 JSON 与 Markdown', async () => {
   const pages = new Map([
     ['Data:Structures/测试结构.json', makeEnvelope(structureDoc(), { label: '测试结构' })],
     ['测试页', '{{渲染器\n|结构名称=测试结构\n|宽度=500px\n}}'],
@@ -127,12 +127,12 @@ test('端到端：#87 命中页面写进 JSON 与 Markdown', async () => {
   assert.equal(code, 0)
   assert.equal(json.summary.pagesWithMounts, 1)
   assert.equal(json.summary.pagesBad, 1)
-  assert.equal(json.summary.hits87, 1)
+  assert.equal(json.summary.hitsMissingTexture, 1)
   assert.equal(json.structures.length, 1)
   assert.equal(json.structures[0].status, 'bad')
   assert.equal(json.structures[0].badBlobs[0].usedInGrid, true)
   assert.match(markdown, /测试页/)
-  assert.match(markdown, /#87/)
+  assert.match(markdown, /missingTexture/)
   assert.ok(!markdown.includes('\r'), 'Markdown 必须是 LF')
 })
 
@@ -149,7 +149,7 @@ test('端到端：分片标题与客户端约定不同名时，退让到站内�
   const structure = json.structures.find((row) => row.name === '多分片')
   assert.ok(structure)
   assert.equal(structure.status, 'bad')
-  assert.equal(json.summary.hits87, 1)
+  assert.equal(json.summary.hitsMissingTexture, 1)
 })
 
 test('端到端：结构页缺失时页面记 unresolved，不静默跳过', async () => {

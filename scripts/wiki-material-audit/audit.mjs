@@ -4,7 +4,7 @@
  * ============================================================================
  *
  * 用法：
- *   $env:HUIJI_AUTHKEY = "..."          # 见 resources/secrets/huiji-wiki.env，禁止入库
+ *   $env:HUIJI_AUTHKEY = "..."          # 团队的灰机共享 key，向 Wiki 维护者索取；禁止入库
  *   node scripts/wiki-material-audit/audit.mjs [--out <dir>] [--limit N] [--page <标题>]
  *                                              [--min-interval <ms>] [--no-sweep] [--verbose]
  *
@@ -13,7 +13,7 @@
  *   2. 枚举嵌入页：template links（Template:渲染器）∪ 全站文章命名空间正文扫描
  *      ∪ insource 搜索补漏（直接写 data-wsr-structure 的页面）；
  *   3. 逐页解析 wikitext，抽出 {{渲染器|结构名称=...}} 与 data-wsr-structure；
- *   4. 逐结构取 Data 页、解 Envelope（含分片）、按 #87 / #9 判据扫 textureBlobs；
+ *   4. 逐结构取 Data 页、解 Envelope（含分片）、按 missingTexture / ic2FaceStrip 判据扫 textureBlobs；
  *   5. 输出 JSON（机读）+ Markdown（人读），默认落在脚本目录的 .out/（已 gitignore）。
  *
  * 退出码：0 = 跑完（无论有没有命中）；1 = 参数/前置错误（例如没给 HUIJI_AUTHKEY）；
@@ -237,7 +237,7 @@ export async function runAudit(options, client) {
     try {
       const loaded = await loadStructure(client, item.dataTitle, auditCache, options)
       record = auditLoaded(item, loaded)
-      if (record.status === 'bad') log(prefix + ' => 命中 ' + record.hits87 + ' 个 #87 / ' + record.hits9 + ' 个 #9')
+      if (record.status === 'bad') log(prefix + ' => 命中 ' + record.hitsMissingTexture + ' 个 missingTexture / ' + record.hitsFaceStrip + ' 个 ic2FaceStrip')
       else if (record.unclassifiedCount) log(prefix + ' => 未判型 ' + record.unclassifiedCount + ' 条')
       else log(prefix + ' => ok')
     } catch (error) {
@@ -249,8 +249,8 @@ export async function runAudit(options, client) {
         code: error && error.code ? error.code : null,
         badBlobs: [],
         unclassified: [],
-        hits87: 0,
-        hits9: 0,
+        hitsMissingTexture: 0,
+        hitsFaceStrip: 0,
         unclassifiedCount: 0,
       }
       log(prefix + ' => 未解析：' + record.error)
@@ -303,8 +303,8 @@ export async function runAudit(options, client) {
     structuresWarn: structureRows.filter((row) => row.status === 'warn').length,
     structuresUnresolved: structureRows.filter((row) => row.status === 'unresolved').length,
     structuresUnclassified: structureRows.filter((row) => row.unclassifiedCount > 0).length,
-    hits87: structureRows.reduce((sum, row) => sum + (row.hits87 || 0), 0),
-    hits9: structureRows.reduce((sum, row) => sum + (row.hits9 || 0), 0),
+    hitsMissingTexture: structureRows.reduce((sum, row) => sum + (row.hitsMissingTexture || 0), 0),
+    hitsFaceStrip: structureRows.reduce((sum, row) => sum + (row.hitsFaceStrip || 0), 0),
     unclassified: structureRows.reduce((sum, row) => sum + (row.unclassifiedCount || 0), 0),
     unreferencedStructurePages: Math.max(0, structurePages.length - referenced.size),
   }
@@ -318,9 +318,9 @@ export async function runAudit(options, client) {
     api: client.base,
     site: siteName,
     criteria: {
-      placeholder87: '#87：16x16、颜色数<=4、洋红占比>10%、纯黑占比>10%',
-      strip9: '#9：384x32 或 192x32 横向带 + IC2 系 locator（ic2: / ic2/）',
-      unclassified: '其它可疑形状（非 IC2 横向带、未达 #87 门槛的占位图样、解码失败）如实列在未判型',
+      missingTexture: '16x16、颜色数<=4、洋红占比>10%、纯黑占比>10%',
+      ic2FaceStrip: '384x32 或 192x32 横向带 + IC2 系 locator（ic2: / ic2/）',
+      unclassified: '其它可疑形状（非 IC2 横向带、未达 missingTexture 门槛的占位图样、解码失败）如实列在未判型',
     },
     enumeration: {
       structurePages: structurePages.length,
@@ -341,8 +341,8 @@ export async function runAudit(options, client) {
   log('  JSON: ' + paths.json)
   log('  MD:   ' + paths.markdown)
   log('  读数: 页面 ' + summary.pagesWithMounts + ' 嵌入 / 命中 ' + summary.pagesBad +
-    ' 页；结构 ' + summary.structuresAudited + ' 审计 / #87 ' + summary.hits87 +
-    ' / #9 ' + summary.hits9 + ' / 未判型 ' + summary.unclassified)
+    ' 页；结构 ' + summary.structuresAudited + ' 审计 / missingTexture ' + summary.hitsMissingTexture +
+    ' / ic2FaceStrip ' + summary.hitsFaceStrip + ' / 未判型 ' + summary.unclassified)
   return summary.structuresUnresolved || summary.pagesUnresolved ? 2 : 0
 }
 
@@ -431,8 +431,8 @@ function auditLoaded(item, loaded) {
     blobCount: audit.blobCount,
     materialCount: audit.materialCount,
     blockCount: audit.blockCount,
-    hits87: audit.hits87,
-    hits9: audit.hits9,
+    hitsMissingTexture: audit.hitsMissingTexture,
+    hitsFaceStrip: audit.hitsFaceStrip,
     unclassifiedCount: audit.unclassifiedCount,
     decodeErrorCount: audit.decodeErrorCount,
     badBlobs: audit.badBlobs,
@@ -453,7 +453,7 @@ async function main() {
   if (!authkey) {
     log('缺少 HUIJI_AUTHKEY。')
     log('站点由 Cloudflare 托管，匿名请求会被挑战页拦下（HTTP 403）。')
-    log('请从 resources/secrets/huiji-wiki.env 取值后设置环境变量，例如：')
+    log('请向 Wiki 维护者索取团队的灰机共享 key，再设置环境变量，例如：')
     log('  $env:HUIJI_AUTHKEY = "..."')
     return 1
   }
