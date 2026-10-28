@@ -1,0 +1,10 @@
+[
+{
+  "modid": "lightning",
+  "name": "Lightning",
+  "description": "Minecraft structure data replay platform — capture, upload, and share 3D structure replays",
+  "version": "0.2",
+  "mcversion": "${minecraftVersion}",
+  "authorList": ["Lightning Team"]
+}
+]

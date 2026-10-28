@@ -1,0 +1,7 @@
+item.lightning.sde_tool_select.name=Lightning Selection Wand
+item.lightning.sde_tool_record.name=Lightning Record Wand
+item.lightning.sde_tool_noter.name=Lightning Cell Note
+lightning.gui.cell_note.title=Cell note
+lightning.gui.cell_note.hint=Enter text for the Wiki tooltip; saved on Save or Enter. Esc cancels.
+lightning.gui.cell_note.save=Save
+lightning.gui.cell_note.cancel=Cancel
