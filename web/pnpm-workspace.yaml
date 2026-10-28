@@ -1,0 +1,10 @@
+# pnpm 设置（pnpm 11 不再读取 package.json 的 pnpm 字段，安装脚本放行用 allowBuilds）。
+#
+# 只放行这两个**既有**依赖的安装脚本，其余保持 pnpm 默认的「不跑脚本」：
+#   - esbuild：vite/vitest 的转译器，安装脚本负责落位平台二进制；
+#   - gl：Node 侧 WebGL 原生扩展，安装脚本是 prebuild-install / node-gyp 选取。
+# 不放开全部脚本。playwright 的浏览器与本设置无关：它的包本身没有安装脚本，
+# 浏览器从来不随依赖安装下载，需要时显式 `pnpm exec playwright install chromium`。
+allowBuilds:
+  esbuild: true
+  gl: true

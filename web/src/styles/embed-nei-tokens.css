@@ -1,0 +1,303 @@
+/**
+ * Modern NEI — Design Tokens for Embed Viewer
+ * Based on real NEI source: ItemsGrid.java, PanelWidget.java, LayoutStyleMinecraft.java
+ */
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('@/assets/fonts/JetBrainsMono-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('@/assets/fonts/JetBrainsMono-Medium.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('@/assets/fonts/JetBrainsMono-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/**
+ * 暗色（默认）值。
+ *
+ * `[data-lk-theme="dark"]` 与 `:root` 同列：亮色块（文件末尾）用
+ * `[data-nei-theme="light"], [data-lk-theme="light"]`，而暗色原先只有 `:root`
+ * ⇒ dark 实例嵌在 light 祖先里时会继承到亮色变量（实例作用域的取值必须跟着实例走）。
+ * 补上这半边后，标了 dark 的元素会重新确立暗色值，与祖先主题无关。
+ */
+:root,
+[data-lk-theme="dark"] {
+  /* Panel hierarchy */
+  --nei-bg-deep: #0a0e18;
+  --nei-bg-panel: #1a1e28;
+  --nei-bg-surface: #242830;
+  --nei-bg-elevated: #2a2e38;
+  --nei-bg-input: #10141c;
+  --nei-bg-hover: rgba(85, 85, 85, 0.26);
+
+  /* Bevel border (3px thick, MC GUI style) */
+  --nei-bevel-light: #5a5e68;
+  --nei-bevel-dark: #0a0e18;
+  --nei-border-slot: #000000;
+  --nei-border-active: #6060a0;
+  --nei-border-panel: #3a3e48;
+  --nei-border-subtle: #2a2e38;
+
+  /* Text */
+  --nei-text: #e8e8e8;
+  --nei-text-dim: #8a8e98;
+  --nei-text-id: #98a0a8;
+  --nei-text-accent: #c0c0f0;
+  --nei-text-mono: #6a6e78;
+  --nei-text-shadow: 1px 1px 0 #0a0e18;
+  --nei-text-shadow-deep: 2px 2px 0 #0a0e18;
+
+  /* Typography */
+  --nei-font-mono: 'JetBrains Mono', ui-monospace, 'Cascadia Code', monospace;
+
+  /* Accent */
+  --nei-accent: #5050a0;
+  --nei-accent-glow: rgba(80, 80, 160, 0.25);
+  --nei-accent-border-light: #8088c0;
+  --nei-accent-border-dark: #2a2a50;
+
+  /* Tooltip (NEI purple) */
+  --nei-tooltip-bg: rgba(16, 0, 16, 0.92);
+  --nei-tooltip-border: #500080;
+  --nei-tooltip-text: #ffffff;
+  --nei-tooltip-dim: #808080;
+
+  /* Scrollbar */
+  --nei-scrollbar-track: #1a1e28;
+  --nei-scrollbar-thumb: #3a3e48;
+
+  /* Extended panel tokens */
+  --nei-bg: #1a1e28;
+  --nei-text-dark: #e8e8e8;
+  --nei-text-muted: #6a6e78;
+  --nei-viewport-bg: #151920;
+  --nei-inset-bg: #12161e;
+
+  /* Bevel border */
+  --nei-bevel-w: 2px;
+  --nei-highlight: #3a4a5e;
+  --nei-shadow: #0a0e18;
+  --nei-label-shadow: 1px 1px 0 #0a0e18;
+
+  /* Status colors */
+  --nei-loading-text: #fcd34d;
+  --nei-ok-text: #86efac;
+  --nei-warn-text: #fde047;
+  --nei-error-text: #fecaca;
+  --nei-error-bg: #450a0a;
+
+  /* Icon buttons */
+  --nei-icon-color: #8a8e98;
+  --nei-icon-hover: var(--nei-text);
+  --nei-icon-active: var(--nei-text-accent);
+  --nei-titlebar-sep: #3a3e48;
+  --nei-title-height: 40px;
+  --nei-icon-btn-size: 28px;
+  --nei-icon-svg-size: 18px;
+
+  /* Misc */
+  --nei-radius-none: 0;
+}
+
+/* ---- NEI Tooltip (global, used by ToolTipBox) ---- */
+/*
+ * Matches real MC rendering from CodeChickenLib GuiDraw.java:
+ *   bg    = 0xf0100010 → rgba(16, 0, 16, 0.94)
+ *   grad1 = 0x505000ff → rgba(80, 0, 255, 0.31)  top / left-start
+ *   grad2 = 0x5028007f → rgba(40, 0, 127, 0.31)  bottom / left-end
+ * Border: 1px, top=grad1, bottom=grad2, left/right=grad1→grad2 vertical
+ */
+.wm-tooltip-surface {
+  box-sizing: border-box;
+  padding: 6px 8px;
+  font-size: 14px;
+  line-height: 1.5;
+  font-family: system-ui, 'Segoe UI', sans-serif;
+  color: #aaaaaa;
+  background: rgba(16, 0, 16, 0.94);
+  border: 1px solid;
+  border-color: rgba(80, 0, 255, 0.25) rgba(80, 0, 255, 0.2) rgba(40, 0, 127, 0.3) rgba(80, 0, 255, 0.2);
+  border-radius: 0;
+  box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.4);
+}
+.wm-tooltip-surface--inline {
+  width: 100%;
+  max-width: min(22rem, 100%);
+}
+.wm-tooltip-box {
+  position: fixed;
+  z-index: 2147483646;
+  width: fit-content;
+  max-width: min(22rem, calc(100vw - 24px));
+  min-width: 0;
+  pointer-events: none;
+}
+.wm-tooltip-body {
+  margin: 0;
+  white-space: pre-line;
+  overflow-wrap: break-word;
+  word-break: normal;
+  text-shadow: 1px 1px 0 rgba(0, 0, 0, 0.5);
+}
+/* First line = item name: white, larger, bold (matches MC §f / rarity color behavior) */
+.wm-tooltip-body::first-line {
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.6;
+  color: #ffffff;
+}
+.wm-tooltip-body strong {
+  font-weight: 700;
+  text-shadow: 1px 1px 0 rgba(0, 0, 0, 0.6);
+}
+.wm-tooltip-body em { font-style: italic; }
+.wm-tooltip-body code {
+  font-family: var(--nei-font-mono);
+  background: rgba(0, 0, 0, 0.2);
+  padding: 0 3px;
+  border-radius: 0;
+  text-shadow: 1px 1px 0 rgba(0, 0, 0, 0.5);
+}
+.wm-tooltip-body a { color: #60a5fa; text-shadow: 1px 1px 0 rgba(0, 0, 0, 0.5); }
+/* MC color-coded spans inherit text-shadow */
+.wm-tooltip-body span { text-shadow: 1px 1px 0 rgba(0, 0, 0, 0.4); }
+
+/* ---- NEI Slider (shared by WorldFrameScrubber & LayerPreviewBar) ---- */
+.nei-slider { position: relative; flex: 1; min-width: 0; height: 28px; display: flex; align-items: center; }
+.nei-slider__track {
+  position: absolute; left: 0; right: 0; top: 50%; height: 4px; margin-top: -2px;
+  background: var(--nei-bg-input);
+  border: 1px solid var(--nei-border-subtle);
+  box-sizing: border-box; pointer-events: none;
+}
+.nei-slider__fill {
+  position: absolute; left: 0; top: 50%; height: 4px; margin-top: -2px;
+  background: var(--nei-accent);
+  pointer-events: none; z-index: 1;
+}
+.nei-slider__range {
+  position: relative; z-index: 2; width: 100%; height: 28px; margin: 0;
+  background: none; cursor: pointer;
+  -webkit-appearance: none; appearance: none;
+}
+.nei-slider__range:disabled { cursor: not-allowed; opacity: 0.55; }
+.nei-slider__range::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 10px; height: 10px;
+  margin-top: -3px;
+  background: var(--nei-bg-surface);
+  border: 2px solid;
+  border-color: var(--nei-bevel-light) var(--nei-bevel-dark) var(--nei-bevel-dark) var(--nei-bevel-light);
+  cursor: grab;
+}
+.nei-slider__range::-webkit-slider-runnable-track { height: 0; background: transparent; }
+.nei-slider__range::-moz-range-thumb {
+  width: 10px; height: 10px;
+  margin-top: -3px;
+  background: var(--nei-bg-surface);
+  border: 2px solid;
+  border-color: var(--nei-bevel-light) var(--nei-bevel-dark) var(--nei-bevel-dark) var(--nei-bevel-light);
+  cursor: grab;
+}
+.nei-slider__range::-moz-range-track { background: transparent; border: none; height: 0; }
+
+/* ---- Global thin scrollbar — NEI style ---- */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--nei-scrollbar-thumb) var(--nei-scrollbar-track);
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--nei-scrollbar-track);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--nei-scrollbar-thumb);
+  border-radius: 0;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--nei-accent);
+}
+
+/* ---- Daylight / Light Theme ---- */
+/* `[data-lk-theme]`：**实例作用域**的选择器（沿 DOM 继承，
+   同页多实例各持主题）；`[data-nei-theme]`（文档根）保留为既有路径。 */
+[data-nei-theme="light"],
+[data-lk-theme="light"] {
+  /* Panel hierarchy */
+  --nei-bg-deep: #b0b0b0;
+  --nei-bg-panel: #c6c6c6;
+  --nei-bg-surface: #e2e2e2;
+  --nei-bg-elevated: #ececec;
+  --nei-bg-input: #5a5a5a;
+  --nei-bg-hover: rgba(0, 0, 0, 0.08);
+
+  /* Bevel border */
+  --nei-bevel-light: #ffffff;
+  --nei-bevel-dark: #555555;
+  --nei-border-slot: #000000;
+  --nei-border-active: #4caf50;
+  --nei-border-panel: #8b8b8b;
+  --nei-border-subtle: #a0a0a0;
+
+  /* Text */
+  --nei-text: #303030;
+  --nei-text-dim: #606060;
+  --nei-text-id: #505050;
+  --nei-text-accent: #388e3c;
+  --nei-text-mono: #707070;
+  --nei-text-shadow: 1px 1px 0 rgba(255, 255, 255, 0.6);
+  --nei-text-shadow-deep: 2px 2px 0 rgba(255, 255, 255, 0.7);
+
+  /* Accent */
+  --nei-accent: #4caf50;
+  --nei-accent-glow: rgba(76, 175, 80, 0.3);
+  --nei-accent-border-light: #81c784;
+  --nei-accent-border-dark: #388e3c;
+
+  /* Scrollbar */
+  --nei-scrollbar-track: #c6c6c6;
+  --nei-scrollbar-thumb: #8b8b8b;
+
+  /* Extended */
+  --nei-bg: #c6c6c6;
+  --nei-text-dark: #303030;
+  --nei-text-muted: #606060;
+  --nei-viewport-bg: #5a5a5a;
+  --nei-inset-bg: #5a5a5a;
+  --nei-highlight: #ffffff;
+  --nei-shadow: #555555;
+  --nei-label-shadow: 1px 1px 0 rgba(255, 255, 255, 0.5);
+
+  /* Status colors — keep bright (status bar bg is dark in both themes) */
+  --nei-loading-text: #fcd34d;
+  --nei-ok-text: #86efac;
+  --nei-warn-text: #fde047;
+  --nei-error-text: #fecaca;
+  --nei-error-bg: #450a0a;
+
+  /* Icon buttons */
+  --nei-icon-color: #606060;
+  --nei-icon-hover: var(--nei-text);
+  --nei-icon-active: var(--nei-text-accent);
+  --nei-titlebar-sep: #a0a0a0;
+}

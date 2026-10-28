@@ -1,0 +1,152 @@
+/**
+ * Precision Workshop — Design Tokens
+ * Cold steel blue on midnight. Industrial precision aesthetic.
+ */
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('@/assets/fonts/JetBrainsMono-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('@/assets/fonts/JetBrainsMono-Medium.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('@/assets/fonts/JetBrainsMono-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/**
+ * 暗色（默认）值。
+ *
+ * ## 为什么选择器里有 `[data-lk-theme="dark"]`
+ *
+ * 亮色块用的是 `[data-lk-theme="light"]`（见下），而**暗色原先只有 `:root`**。
+ * 自定义属性沿 DOM 继承 ⇒ 一个 `dark` 实例嵌在 `light` 实例（或 light 文档根）
+ * 里时，它从祖先继承到**亮色**变量，而自己没有一条规则把暗色值重新确立 ——
+ * 于是"一 light 一 dark 同页"里 dark 那半显示成亮色。
+ *
+ * 把 `[data-lk-theme="dark"]` 加进暗色块后，**任何**标了 dark 的元素
+ * （实例根或文档根）都会重新确立暗色值，与祖先的主题无关。
+ * 这是"主题作用域补齐半边"，不是新机制：`[data-lk-theme]` 本就由
+ * `shellSettings.scopeAttrs` 写在每个实例根上，只是此前只有 light 半边有规则。
+ *
+ * `:root` 保留（未标任何主题属性时的默认）。
+ */
+:root,
+[data-lk-theme="dark"] {
+  /* Surface hierarchy */
+  --wb-bg-deepest: #080d12;
+  --wb-bg-surface: #111c26;
+  --wb-bg-elevated: #1a2633;
+  --wb-bg-hover: #253442;
+
+  /* Borders — tuned for surface hierarchy above */
+  --wb-border: #243544;
+  --wb-border-light: #2a3f52;
+
+  /* Accent */
+  --wb-accent: #4dabf7;
+  --wb-accent-muted: #7aa2c4;
+
+  /* Text — dim/muted tuned for WCAG AA (≥4.5:1) on surface (#111c26) */
+  --wb-text: #c5d8e8;
+  --wb-text-muted: #889eb8;
+  --wb-text-dim: #6a7e96;
+
+  /* Typography */
+  --wb-font-mono: 'JetBrains Mono', ui-monospace, 'Cascadia Code', monospace;
+
+  /* Semantic */
+  --wb-success: #2ecc71;
+  --wb-danger: #e74c3c;
+  --wb-danger-bg: #301a1a;
+  --wb-warn: #f59e0b;
+
+  /* Focus */
+  --wb-focus-ring: #4dabf7;
+
+  /* Scrollbar */
+  --wb-scrollbar-width: 6px;
+  --wb-scrollbar-track: #080d12;
+  --wb-scrollbar-thumb: #243544;
+
+  /* Viewport */
+  --wb-viewport-bg: #060a10;
+  --wb-grid-color: rgba(77, 171, 247, 0.025);
+
+  /* Misc */
+  --wb-radius-sm: 3px;
+  --wb-radius-md: 4px;
+  --wb-radius-lg: 6px;
+  --wb-radius-xl: 8px;
+  --wb-radius-full: 10px;
+}
+
+/**
+ * 亮色覆盖。
+ *
+ * `[data-lk-theme]` 是**实例作用域**的选择器：
+ * 自定义属性沿 DOM 继承，因此把该属性放在**实例根元素**上时，
+ * 同页两个实例各自解析出各自的变量值 —— 而 `[data-wb-theme]`（文档根）
+ * 是全页一份，第二个实例挂载即覆盖第一个。
+ *
+ * 两者并存：旧属性仍由既有外壳/宿主设置，不改变现有行为；
+ * 实例作用域是新增的可选路径。
+ */
+[data-wb-theme="light"],
+[data-lk-theme="light"] {
+  --wb-bg-deepest: #dee4ea;
+  --wb-bg-surface: #eaeef3;
+  --wb-bg-elevated: #f2f5f8;
+  --wb-bg-hover: #d8dfe8;
+  --wb-border: #c0c8d0;
+  --wb-border-light: #d0d6de;
+  --wb-accent: #2563eb;
+  --wb-accent-muted: #4b7cb8;
+  --wb-text: #1a2532;
+  --wb-text-muted: #445366;
+  --wb-text-dim: #667788;
+  --wb-success: #16a34a;
+  --wb-danger: #dc2626;
+  --wb-danger-bg: #fecaca;
+  --wb-warn: #d97706;
+  --wb-scrollbar-track: #d0d6de;
+  --wb-scrollbar-thumb: #a0aab4;
+  --wb-viewport-bg: #d8dce2;
+  --wb-grid-color: rgba(37, 99, 235, 0.04);
+}
+
+/* Custom scrollbar — global */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--wb-scrollbar-thumb) var(--wb-scrollbar-track);
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--wb-scrollbar-track);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--wb-scrollbar-thumb);
+  border-radius: 2px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--wb-accent);
+}
