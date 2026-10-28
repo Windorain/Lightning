@@ -1,0 +1,26 @@
+{
+	"settings": {
+		"rights": [],
+		"default": false,
+		"package": false,
+		"hidden": false,
+		"skins": [],
+		"actions": ["view"],
+		"namespaces": [],
+		"category": "结构渲染",
+		"supportsUrlLoad": false
+	},
+	"module": {
+		"scripts": [
+			"StructureWorkbench.js"
+		],
+		"styles": [
+			"StructureWorkbench.css"
+		],
+		"datas": [],
+		"peers": [],
+		"dependencies": ["structureDataMultipart"],
+		"messages": [],
+		"type": "general"
+	}
+}

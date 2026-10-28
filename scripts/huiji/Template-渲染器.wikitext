@@ -1,0 +1,139 @@
+<includeonly><div
+ class="web-structure-renderer"
+ data-wsr-structure="{{{结构名称}}}"
+ style="background:#0f172a;width:{{{宽度|800px}}};height:{{{高度|600px}}};"
+{{#if:{{{分层预览|}}}| data-wsr-feature-layer-bar="{{{分层预览}}}"}}
+{{#if:{{{标题栏|}}}| data-wsr-feature-title-bar="{{{标题栏}}}"}}
+{{#if:{{{播放条|}}}| data-wsr-feature-frame-controls="{{{播放条}}}"}}
+{{#if:{{{统计栏|}}}| data-wsr-feature-block-stats="{{{统计栏}}}"}}
+{{#if:{{{调试状态栏|}}}| data-wsr-feature-debug-status="{{{调试状态栏}}}"}}
+{{#if:{{{坐标轴|}}}| data-wsr-feature-axes-gizmo="{{{坐标轴}}}"}}
+></div></includeonly>
+<noinclude>
+在词条中插入一块可旋转、可缩放的 '''GTNH 结构 3D 预览'''。只需准备好结构数据，并用下面模板写上结构名称即可。
+
+== 快速开始 ==
+
+# 在游戏里用 Structure Data Exporter（SDE）导出结构，得到 <code>.json</code> 文件（见下文「在游戏里导出」）。
+# 打开 [[Project:GTNH在线结构渲染器结构数据上传|结构数据上传页]]，登录后上传 JSON（名称与下文模板里的「结构名称」一致，'''不要'''带 <code>.json</code> 后缀）。
+# 在词条里写上：
+<pre>{{渲染器
+|结构名称=你的结构名
+}}</pre>
+不写宽高时，默认显示区域为 '''800×600''' 像素；手机浏览时会自动缩小以适配屏幕宽度。
+
+== 效果展示 ==
+
+{{渲染器
+|结构名称=工业高炉四共
+|宽度=750px
+|高度=500px
+|分层预览=true
+|标题栏=true
+|统计栏=true
+}}
+
+== 在游戏里导出 ==
+
+'''安装'''：将 SDE 模组放入游戏的 <code>mods</code> 文件夹。下载见 [https://github.com/Windorain/StructureDataExporter GitHub] 或 [https://qm.qq.com/q/dsDb4C7504 GTNH 中文维基群] 群文件。
+
+'''推荐流程'''（单帧结构）：
+
+# 搭好要展示的建筑；
+# 聊天栏输入 <code>/sde start</code> 开始导出；
+# 用 <code>/sde pos1</code>、<code>/sde pos2</code>（站在角落）或 <code>/sde hpos1</code>、<code>/sde hpos2</code>（准星点选）框选区域；
+# 可选：<code>/sde setname 名称</code> 指定文件名（无后缀）；
+# <code>/sde record</code> 记录当前画面，<code>/sde export</code> 导出到本地；
+# 需要边导边调视角时，可用 <code>/sde web</code> 打开本机工作台预览，用完后 <code>/sde webstop</code> 关闭。
+
+常用命令一览：
+
+{{tables| 命令 | 作用 }}
+{{row| <code>/sde start</code> | 开始一次导出 }}
+{{row| <code>/sde end</code> | 结束当前导出 }}
+{{row| <code>/sde pos1</code> / <code>pos2</code> | 以脚下方块为选区角点 }}
+{{row| <code>/sde hpos1</code> / <code>hpos2</code> | 以准星方块为选区角点 }}
+{{row| <code>/sde setname &lt;名称&gt;</code> | 设置导出文件名 }}
+{{row| <code>/sde record</code> | 记录当前选区为一帧 }}
+{{row| <code>/sde export</code> | 写出 JSON 文件 }}
+{{row| <code>/sde web</code> / <code>webstop</code> | 开启 / 关闭本机预览网页 }}
+{{row| <code>/sde sel</code> | 切换选区模式（立方体 / 延伸） }}
+{{tablee}}
+
+== 把结构放到维基 ==
+
+'''推荐'''：[[Project:GTNH在线结构渲染器结构数据上传|结构数据上传页]] — 选好文件点上传即可，大文件会自动处理，无需手贴整段 JSON。
+
+'''备用'''：若你熟悉维基数据页，也可新建 <code>Data:Structures/结构名称.json</code>，将 JSON 全文粘贴保存。示例：[[Data:Structures/MEControllers5x5x5.json]]。
+
+== 在词条里使用 ==
+
+最简写法（使用默认 800×600 视口）：
+
+<pre>{{渲染器
+|结构名称=沙盒
+}}</pre>
+
+{{渲染器
+|结构名称=沙盒
+|宽度=500px
+|高度=500px
+}}
+
+需要材料列表、分层条等界面时，把对应项设为 <code>true</code>（默认不显示，页面更简洁）：
+
+<pre>{{渲染器
+|结构名称=MEControllers5x5x5
+|宽度=500px
+|高度=500px
+|统计栏=true
+|分层预览=true
+}}</pre>
+
+{{渲染器
+|结构名称=MEControllers5x5x5
+|宽度=500px
+|高度=500px
+|统计栏=true
+|分层预览=true
+}}
+
+{| class="wikitable"
+! 参数 !! 说明 !! 常用值
+|-
+| <code>结构名称</code> || '''必填'''。与上传时的名称、<code>Data:Structures/</code> 下文件名一致（不含 <code>.json</code>） || 如 <code>PseudoBiosphere</code>
+|-
+| <code>宽度</code> / <code>高度</code> || 预览区域大小 || 默认 <code>800px</code> × <code>600px</code>；可写 <code>500px</code> 等
+|-
+| <code>分层预览</code> || 底部按高度分层浏览 || <code>true</code> 开启
+|-
+| <code>标题栏</code> || 顶部场景标题与工具按钮 || <code>true</code> 开启
+|-
+| <code>统计栏</code> || 右侧方块/material 列表 || <code>true</code> 开启；对线缆等不完整方块支持有限
+|-
+| <code>播放条</code> || 多帧动画切换 || 暂未实装
+|-
+| <code>调试状态栏</code> / <code>坐标轴</code> || 维护者调试用 || 一般保持关闭
+|}
+
+{{提示|想把预览收进折叠里、节省版面，可参考 [[多方块机器共用#核聚变反应堆]] 的写法。}}
+
+{{警告提醒|统计栏对部分方块（如线缆）显示不完整，若列表异常可关闭 <code>统计栏=true</code>。}}
+
+== 进阶 ==
+
+需要更细的控制（例如自定义加载提示、关闭手机自动缩放）时，可直接写 <code>class="web-structure-renderer"</code> 的 <code>div</code> 及 <code>data-wsr-*</code> 属性。说明见 [[结构渲染器测试界面]]。
+
+== 已上传的结构列表 ==
+
+{{#invoke:结构渲染器|listStructures}}
+
+== 在维基里改注释 ==
+
+不必进游戏也能改方块说明：见 [[模板:结构工作台]]。
+
+== 说明与反馈 ==
+
+功能仍在持续更新，若遇到显示异常、模组不兼容或文档不清楚，欢迎到 GTNH 中文维基群联系 [[User:ChengMing]]。
+{{Navbox template}}
+</noinclude>

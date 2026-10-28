@@ -1,0 +1,6 @@
+<includeonly>
+<div class="web-structure-workbench"></div>
+</includeonly>
+<noinclude>
+<div class="web-structure-workbench"></div>
+</noinclude>
