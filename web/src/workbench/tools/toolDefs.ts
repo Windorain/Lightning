@@ -1,0 +1,37 @@
+// web/src/workbench/tools/toolDefs.ts
+import type { Tool } from './tool'
+
+export const selectTool: Tool = {
+  id: 'select',
+  label: '选择',
+  icon: '▲',
+  cursor: 'default',
+  operator: 'OPERATOR_SELECT',
+  keymap: [
+    { type: 'MOUSE', button: 0, opId: 'OPERATOR_SELECT', description: '选择方块' },
+  ],
+  hints: [
+    { keys: ['Click'], action: '选择方块' },
+    { keys: ['Shift', 'Click'], action: '追加选择' },
+    { keys: ['Ctrl', 'Click'], action: '减少选择' },
+  ],
+}
+
+export const moveTool: Tool = {
+  id: 'move',
+  label: '移动',
+  icon: '↕',
+  cursor: 'move',
+  operator: 'OPERATOR_MOVE',
+  keymap: [
+    { type: 'KEY', key: 'g', toolId: 'move', description: '移动工具' },
+    { type: 'MOUSE', button: 0, opId: 'OPERATOR_MOVE', description: '自由移动/选择' },
+  ],
+  properties: {},
+  hints: [
+    { keys: ['Drag'], action: '自由移动' },
+    { keys: ['X', 'Y', 'Z'], action: '锁定轴向' },
+    { keys: ['Shift'], action: '精确模式' },
+    { keys: ['Esc'], action: '取消' },
+  ],
+}

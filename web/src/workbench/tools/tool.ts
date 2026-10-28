@@ -1,0 +1,74 @@
+// web/src/workbench/tools/tool.ts
+import type { Ref } from 'vue'
+import type { SelectionContext, BlockRef } from '@/context/selection'
+import type { ViewportSlot } from '@/runtime/types'
+import type { InputBinding } from '@/keymap'
+import type { Frame } from '@/render/schema/types'
+// 形状契约迁出旧实现文件（见 `presentation/pickResult` 的说明）。
+import type { PickEntity } from '@/presentation/pickResult'
+
+export interface ToolHint {
+  keys: string[]
+  action: string
+}
+
+/** Tool 是纯数据结构，没有方法。交互走 Gizmo，数据改写走 Operator。 */
+export interface Tool {
+  id: string
+  label: string
+  icon: string
+  cursor?: string
+
+  /** 动态键映射：激活时注入，优先于默认 keymap 匹配 */
+  keymap?: InputBinding[]
+  /** 回退键映射：同一工具的第二组绑定（不是另一个 Tool） */
+  keymapFallback?: InputBinding[]
+
+  /** 主操作符 ID（内省 / 提示 / 快捷键标签） */
+  operator?: string
+  /** 操作符属性预设：键映射匹配时自动注入，keymap item 的 props 覆盖这些值 */
+  properties?: Record<string, unknown>
+  /** 工具级覆盖色 */
+  color?: string
+  /** 修饰键功能提示（悬浮在 viewport 右下角） */
+  hints?: ToolHint[]
+  /** 工具组 ID：相同 group 的工具在工具栏折叠为一个槽位，点击小三角展开变体 */
+  group?: string
+}
+
+/** Gizmo 是交互+渲染入口。一个 Tool 可以关联零个或一个 Gizmo。 */
+export interface ToolGizmo {
+  activate(ctx: ToolContext): void
+  deactivate(): void
+
+  onPointerDown?(ctx: ToolContext, event: PointerEvent): void
+  onPointerMove?(ctx: ToolContext, event: PointerEvent): void
+  onPointerUp?(ctx: ToolContext, event: PointerEvent): void
+
+  /** rAF 每帧渲染 */
+  render(ctx: ToolContext): void
+}
+
+/** ToolContext 是传递给 Tool 和 Gizmo 的运行环境。 */
+export interface ToolContext {
+  selection: SelectionContext
+  viewport: ViewportSlot
+
+  pickVoxel(event: PointerEvent): BlockRef | null
+  pickAll(event: PointerEvent): readonly PickEntity[]
+  getCurrentFrame(): Frame | null
+  /** 将 Y-up GridPos 转换为世界空间体素中心坐标 */
+  gridCenterWorld(pos: { x: number; y: number; z: number }): { x: number; y: number; z: number } | null
+
+  /** 获取方块在指定位置的四边面几何数据 */
+  getBlockGeometry(pos: { x: number; y: number; z: number }): { vertices: { x: number; y: number; z: number }[] }[] | null
+
+  /** 调用操作符 */
+  invokeOperator(id: string, props?: Record<string, unknown>, event?: Event, regionId?: string): string
+
+  /** 当前活跃 Tool（切换工具时由 ToolRegistry 更新） */
+  readonly activeTool: Ref<Tool | null>
+
+  /** 查询指定 region 的模态栈深度。>0 表示有操作符在模态运行中 */
+  modalDepth(regionId: string): number
+}

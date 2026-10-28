@@ -1,0 +1,38 @@
+import type { Context } from '@/runtime/context'
+import type { PanelDeclaration } from '../types/panel'
+import { SpaceType, RegionType } from '@/runtime/screenTypes'
+import type { UILayout } from '../types/layout'
+
+export const transformPanel: PanelDeclaration = {
+  id: 'transform-panel',
+  label: '变换',
+  spaceType: SpaceType.PROPERTIES,
+  regionType: RegionType.MAIN,
+  workspaces: ['preview'],
+
+  poll(ctx: Context): boolean {
+    return ctx.getToolRegistry().activeTool.value?.id === 'move'
+      && ctx.getSelection().items.value.size > 0
+  },
+
+  layout(ctx: Context): UILayout {
+    const sel = [...ctx.getSelection().items.value].filter(e => e.kind === 'block')
+    if (sel.length === 0) {
+      return { kind: 'column', align: false, items: [{ kind: 'label', text: '未选择方块' }] }
+    }
+
+    // Build a label showing selected count and first position
+    const first = sel[0]
+    const posLabel = sel.length === 1
+      ? `(${first.ref.pos.x}, ${first.ref.pos.y}, ${first.ref.pos.z})`
+      : `${sel.length} 个方块已选`
+
+    return {
+      kind: 'column', align: false, items: [
+        { kind: 'label', text: posLabel },
+        { kind: 'separator' },
+        { kind: 'operator', id: 'OPERATOR_MOVE', label: '移动 (G)', props: {} },
+      ],
+    }
+  },
+}
