@@ -1,0 +1,120 @@
+import type { OperatorType } from '@/operators/operatorType'
+import {
+  sdePing,
+  sdeListExports,
+  sdeGetExportFile,
+  sdePutWorkspaceDocument,
+} from '@/workbench/sdeApi'
+import { adoptDocumentIntoKernel } from '@/operators/builtin/docLifecycleOperators'
+import { settleDocumentTakeover } from '@/workbench/document/pipeline'
+import { plainRootOf } from '@/adapters/plainRoot'
+
+export const SDEConnectOperator: OperatorType = {
+  id: 'OPERATOR_SDE_CONNECT',
+  label: '连接 SDE',
+  description: '测试 SDE 连接并拉取导出列表',
+
+  poll(_ctx) {
+    return true
+  },
+
+  async exec(ctx, _props) {
+    ctx.getConnection().connected = null
+    if (!ctx.getConnection().apiBase) {
+      ctx.getConnection().connected = false
+      return
+    }
+    try {
+      await sdePing(ctx.getConnection().apiBase, ctx.getConnection().token)
+      ctx.getConnection().connected = true
+      ctx.getConnection().exportsLoading = true
+      try {
+        ctx.getConnection().exports = await sdeListExports(ctx.getConnection().apiBase, ctx.getConnection().token)
+      } catch { ctx.getConnection().exports = [] }
+      finally { ctx.getConnection().exportsLoading = false }
+    } catch { ctx.getConnection().connected = false }
+  },
+}
+
+export const SDELoadExportOperator: OperatorType = {
+  id: 'OPERATOR_SDE_LOAD',
+  label: '加载导出',
+  description: '从 SDE 导出列表加载指定场景',
+
+  poll(ctx) {
+    return ctx.getConnection().connected === true
+  },
+
+  async exec(ctx, _props) {
+    const name = _props.name as string
+    ctx.getSelection().clear()
+      // `getEditHistory().clear()` 已删 —— 理由同
+    // `docLifecycleOperators#NewSceneOperator`：下方的 `setDocument` 换文档即换
+    // `Document#history`（内核契约 §3.2 所有权表），清空是结构上已发生的事。
+    const data = await sdeGetExportFile(ctx.getConnection().apiBase, ctx.getConnection().token, name)
+    ctx.getConnection().selectedExportName = name
+    const result = await ctx.main.registries.parsers.detectAndParse(data)
+    if (result.document) {
+      ctx.setDocument( result.document)
+      ctx.requireKernelSession().seekFrame(0)
+        // **本路径此前从不装配内核**（未装配路径之一）。
+        // `plainRootOf` 是**同步**函数（统一口径），故不 await。
+      adoptDocumentIntoKernel(ctx, result.document, plainRootOf(data), name)
+      // SDE 不是 Wiki：旧 Wiki 绑定的 locator/revision/基线不得继续描述它。
+      settleDocumentTakeover(ctx, { kind: 'document', sourceId: 'sde-export', locator: name })
+      const totalBlocks = result.document.frames.reduce((sum, f) => sum + (f.grid?.count() ?? 0), 0)
+      ctx.log.info('场景加载', `SDE · ${name}`, { fileName: name, frames: result.document.frameCount, blocks: totalBlocks })
+    } else {
+      // 失败清空文档 ⇒ 绑定也必须清空（不留下"来自 Wiki A"的假身份）。
+      ctx.setDocument( null)
+      settleDocumentTakeover(ctx, { kind: 'no-document' })
+      ctx.log.error('场景加载', result.error ?? '未知错误', { fileName: name, error: result.error })
+    }
+    ctx.getWorkspaceMode().value = 'sde'
+    ctx.getLocalFileName().value = name
+  },
+}
+
+export const SDELoadWorkspaceOperator: OperatorType = {
+  id: 'OPERATOR_SDE_LOAD_WORKSPACE',
+  label: '加载 SDE 工作区文档',
+  poll(ctx) { return ctx.getConnection().connected === true },
+  async exec(ctx, props) {
+    const data = props.data
+    ctx.getSelection().clear()
+    // `getEditHistory().clear()` 已删（同上）。
+    const result = await ctx.main.registries.parsers.detectAndParse(data)
+    if (result.document) {
+      ctx.setDocument( result.document)
+      ctx.requireKernelSession().seekFrame(0)
+        // **本路径此前从不装配内核**（未装配路径之一）。
+      adoptDocumentIntoKernel(ctx, result.document, plainRootOf(data), 'SDE workspace')
+      settleDocumentTakeover(ctx, { kind: 'document', sourceId: 'sde-export', locator: 'SDE workspace' })
+      ctx.log.info('场景加载', 'SDE workspace', { frames: result.document.frameCount })
+    } else {
+      ctx.setDocument( null)
+      settleDocumentTakeover(ctx, { kind: 'no-document' })
+      ctx.log.error('场景加载', result.error ?? '未知错误')
+    }
+    await ctx.getOperators().exec('OPERATOR_SET_WORKSPACE_MODE', { mode: 'sde' })
+  },
+}
+
+export const SDEPushOperator: OperatorType = {
+  id: 'OPERATOR_SDE_PUSH',
+  label: '推送到 SDE',
+  description: '将当前场景保存到 SDE 工作区',
+
+  poll(ctx) {
+    return ctx.getConnection().connected === true && ctx.hasLoadedDocument()
+  },
+
+  async exec(ctx, _props) {
+    if (!ctx.getConnection().apiBase || !ctx.hasLoadedDocument()) return
+    await sdePutWorkspaceDocument(
+      ctx.getConnection().apiBase,
+      ctx.getConnection().token,
+      ctx.plainForSave().plain as Record<string, unknown>,
+    )
+  },
+}
