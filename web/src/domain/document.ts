@@ -1,0 +1,688 @@
+/**
+ * `domain/document` —— **文档状态域**：内容、版本、历史、保存基线（契约 §1.4）。
+ *
+ * ## 1. 本模块是「文档内容 / 历史 / 保存基线」的唯一权威拥有者
+ *
+ * 所有权表头两行：文档内容与历史、保存基线都归**文档状态域**，
+ * 「撤销栈与保存基线随**文档**而非工作区存活」。
+ * 因此本模块导出的 `Document` 是**值**，`EditContext`（见 `domain/editing`）只持有它的引用。
+ *
+ * ## 2. 版本两分的落地（契约 §1.4 的决定，见 `domain/identity` 文件头）
+ *
+ * - `documentVersion` 单调、只因内容变化推进；
+ * - `contentVersion` = 内容摘要，用于**与保存基线比较相等**。
+ *
+ * 「dirty 根据内容身份/内容版本相对保存基线判断，**不使用仅单调增长的提交计数**；
+ * 撤销回实际保存内容必须干净」在本模块由 `isDirty` 直接实现：
+ * 判据是 `sameContent(doc.version, doc.saveBaseline)`。
+ *
+ * ## 3. 幽灵历史防御
+ *
+ * 「拒绝/取消零残留、幽灵历史防御」。两条防线：
+ * - **入场**：`pushHistory` 只在 `before.contentVersion !== after.contentVersion` 时记账。
+ * 新建容器不算数（契约 §1.4「仅创建了新容器**不**等于内容变化」）——判据是**内容身份**。
+ * - **净零往返**：拖动移出再移回，内容身份回到起点 ⇒ 记账被拒（`pushHistory` 返回 `null`）。
+ * 这条让「取消一次净变化为零的往返拖动不得产生幽灵历史」（末句）成立。
+ *
+ * ## 4. 历史条目携带选择映射，但不是"回放旧选择直接引用已失效对象"
+ *
+ * 「内容历史条目可携带该操作前后相关选择映射；撤销时**根据当前有效对象解析**」。
+ * ⇒ 条目里存的是 `EntityRef`（值），撤销时经 `resolveSelectionAfterUndo` **对着新场景**解析，
+ * 已失效目标被丢弃并报告，不直接照搬。这是负对照「回放旧选择直接引用已失效对象」的落点。
+ */
+
+import {
+  VERSION_ZERO,
+  changeSummary,
+  contentDigest,
+  digestOf,
+  entityRef,
+  objectRef,
+  sameContent,
+  sameVersion,
+  version,
+  type ChangeSummary,
+  type EntityRef,
+  type Version,
+} from './identity'
+import { err, invalidValue, missingTarget, ok, type Result } from './errors'
+import { unitBoxMesh, type Deformation } from './geometry'
+import { EMPTY_CONTENT, type DocumentContent } from './content'
+import {
+  emptyScene,
+  findObject,
+  findObjectData,
+  sceneObject,
+  objectData,
+  withObject,
+  defaultObjectTypes,
+  type Scene,
+  type ObjectTypeRegistry,
+  type Transform,
+} from './scene'
+import { EMPTY_ANIMATION, type AnimationState } from './animation'
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 历史
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 一个内容历史条目。
+ *
+ * `beforeScene` / `afterScene` 是**不可变场景的引用**，不是深拷贝：
+ * `domain/scene` 的每次结构变更都返回新场景并共享未变子树，
+ * 故"存快照"在本模型下等于"存一个指针"，不构成 所禁止的
+ * 「每次鼠标移动重复复制整份文档」。
+ *
+ * `beforeAnimation` / `afterAnimation`（增补）承载动画状态的快照。
+ * 它们**可选**是为了让"只改场景"的历史条目不必伪造一份动画状态；
+ * `undo`/`redo` 对缺省值是"保持当前动画不变"—— 语义上正确，因为
+ * 该条目本来就没有改动画。
+ */
+export interface HistoryEntry {
+  readonly label: string
+  readonly beforeScene: Scene
+  readonly afterScene: Scene
+  readonly beforeVersion: Version
+  readonly afterVersion: Version
+  readonly changes: ChangeSummary
+  /** 操作前相关选择（值引用）。 */
+  readonly selectionBefore: readonly EntityRef[]
+  /** 操作后相关选择（值引用）。 */
+  readonly selectionAfter: readonly EntityRef[]
+  /** 操作前的动画状态（仅当该条目改动了动画）。 */
+  readonly beforeAnimation?: AnimationState
+  /** 操作后的动画状态（仅当该条目改动了动画）。 */
+  readonly afterAnimation?: AnimationState
+  /**
+ * 操作前后的**文档内容三块**（元数据/帧时长轴/资源引用）。
+ *
+ * 与 `beforeAnimation` 同一处置（可选 + 缺省 = 「保持当前值」）：
+ * 该条目没改这三块时不伪造一份副本，撤销时也不去"恢复"一个本就没变的字段。
+ *
+ * 为什么必须存：改了元数据是**内容变化**（会进 `contentOf` 摘要、会记账），
+ * 于是撤销必须真的把它改回去 —— 否则「撤销后内容身份回到 before」不成立，
+ * `isDirty` 会在撤销后仍报脏（「回保存内容变干净」的反面）。
+ */
+  readonly beforeContent?: DocumentContent
+  readonly afterContent?: DocumentContent
+}
+
+export interface HistoryState {
+  readonly past: readonly HistoryEntry[]
+  readonly future: readonly HistoryEntry[]
+  readonly maxDepth: number
+}
+
+export const DEFAULT_HISTORY_DEPTH = 256
+
+export function emptyHistory(maxDepth = DEFAULT_HISTORY_DEPTH): HistoryState {
+  return Object.freeze({ past: Object.freeze([]), future: Object.freeze([]), maxDepth })
+}
+
+export const canUndo = (h: HistoryState): boolean => h.past.length > 0
+export const canRedo = (h: HistoryState): boolean => h.future.length > 0
+export const undoLabel = (h: HistoryState): string | null => (h.past.length > 0 ? h.past[h.past.length - 1].label : null)
+export const redoLabel = (h: HistoryState): string | null => (h.future.length > 0 ? h.future[h.future.length - 1].label : null)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 文档
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 文档：独立保存与撤销的内容单元。
+ *
+ * 注意本类型**没有** raw JSON / 格式字段袋（`Record<string, unknown>`）：
+ * 第 2 条要求「核心无 raw JSON/格式字段袋」，格式保真记录属于
+ * `adapters/files`。这是这里不复制旧 `RuntimeDocument` 的关键差异。
+ */
+export interface Document {
+  readonly id: string
+  /** 文档内容。 */
+  readonly scene: Scene
+  /**
+ * **文档内容的其余三块**（补齐；见 `domain/content` 的文件头）。
+ *
+ * ## 为什么它与 `scene`/`animation` 并列，而不是塞进 `scene`
+ *
+ * `scene` 是「对象 + 对象数据 + 集合」；本字段承载 定义里
+ * **另外三样**：资源引用（§3.1 原文列在 `Document` 定义里）、文档元数据、
+ * 帧时长轴。它们不是「场景的对象结构」——
+ * 把元数据塞进 `scene.objects` 会造出一个假对象；把资源引用塞进去会
+ * 让「这份文档引用哪些资源」变成一次对象遍历（而它是**清单**语义，见内容身份与版本）。
+ *
+ * ## 它替代了什么（实测的缺口）
+ *
+ * 旧 `RuntimeDocument` 的 `meta` / `textureBlobs` / `materialPalette` /
+ * `frames[].durationMs` 在内核里**没有类型化落点**，于是没有任何生产代码能
+ * 把一份真实场景文件装配成内核 `Document`（blocker 原文）。
+ *
+ * ## 为什么**进内容身份**（与 `history`/`saveBaseline` 的区别）
+ *
+ * 改元数据/换一帧时长/换一份纹理字节都**是**内容变化：应可撤销、应变脏。
+ * 故它们进 `contentOf` 的摘要输入 —— 见 {@link contentOf}。
+ */
+  readonly content: DocumentContent
+  /**
+ * 动画（轨道 + 发布默认值）。
+ *
+ * 归属依据（所有权表第一行）：「文档内容、对象与数据、**动画** |
+ * 文档状态域 | 随打开文档存活 | 工程保存、文档历史」。
+ *
+ * ⇒ 轨道进**内容身份**（`contentOf` 的摘要输入），于是：
+ * - 插入/删除关键帧、启用/禁用轨道 = 可撤销的内容变化（会推进 `documentVersion`）；
+ * - **播放**（推进时间）只改 `EditContext.time`，**不**碰这里 ⇒
+ * 「动画播放不增加文档版本或撤销条目」在结构上成立。
+ *
+ * 曾在 `application/commands` 里用一个"读取 `doc.tracks`（若存在）"的
+ * 类型断言占位（`animationDriven`）。那是**故意的临时形态**：它让拒绝路径
+ * 在 就有落点而不预造 的数据模型。 在此把它换成真实字段，
+ * 断言随之消失（不留旁路）。
+ */
+  readonly animation: AnimationState
+  /** 当前版本（单调世代 + 内容身份）。 */
+  readonly version: Version
+  /** 最后一次成功保存时的**内容身份**。 */
+  readonly saveBaseline: Version
+  readonly history: HistoryState
+  /** 对象类型贡献表（扩展点在装配层，不在核心 switch）。 */
+  readonly types: ObjectTypeRegistry
+  /** 已成功完成的保存序号（供保存竞态判定，见 `SaveLedger`）。 */
+  readonly savedSequence: number
+}
+
+/**
+ * 文档的**内容身份输入**。
+ *
+ * 为什么把"内容"抽成一个函数而不是散在 `withScene` 里：内容身份决定了
+ * `documentVersion` 是否推进、历史是否记账、脏状态、以及求值键的
+ * `documentVersion` 那一维。它必须**只有一个**定义点，否则
+ * "什么算内容变化"会出现第二套判据（第 5 条要移除的正是这类分叉）。
+ *
+ * 注意 `version` / `saveBaseline` / `history` / `savedSequence` **不在**其中：
+ * 它们不是内容（历史深度变化不该让文档变脏）。
+ */
+export function contentOf(scene: Scene, animation: AnimationState, content: DocumentContent = EMPTY_CONTENT): unknown {
+  return { scene, animation, content }
+}
+
+/** 文档内容身份摘要（唯一算法：`digestOf`）。 */
+export function contentDigestOf(scene: Scene, animation: AnimationState, content: DocumentContent = EMPTY_CONTENT): number {
+  return digestOf(contentOf(scene, animation, content))
+}
+
+export function createDocument(
+  id: string,
+  opts?: { sceneId?: string; maxHistory?: number; types?: ObjectTypeRegistry; content?: DocumentContent },
+): Document {
+  const scene = emptyScene(opts?.sceneId ?? `${id}-scene`)
+  const content = opts?.content ?? EMPTY_CONTENT
+  const contentVersion = contentDigestOf(scene, EMPTY_ANIMATION, content)
+  return Object.freeze({
+    id,
+    scene,
+    content,
+    animation: EMPTY_ANIMATION,
+    version: version(0, contentVersion),
+    saveBaseline: version(0, contentVersion),
+    history: emptyHistory(opts?.maxHistory),
+    types: opts?.types ?? defaultObjectTypes(),
+    savedSequence: 0,
+  })
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 内容变更（推进版本）
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 用新场景替换文档内容，**仅当内容身份确实改变时**推进 `documentVersion`。
+ *
+ * 这是契约 §1.4「仅创建了新容器**不**等于内容变化」与
+ * 第 5 条「非内容版本不得冒充内容变化」的共同落点：
+ * 判定按 `contentDigestOf(scene, animation)`，不按"是否新建了对象"。
+ *
+ * 动画状态保持不变（改动画请用 `withAnimation`；两者都经同一内容身份判据）。
+ */
+export function withScene(doc: Document, scene: Scene): { doc: Document; changed: boolean; version: Version } {
+  return withContent(doc, scene, doc.animation)
+}
+
+/**
+ * 用新场景 **+ 新动画**替换文档内容。
+ *
+ * 之所以让 `withScene` 与 `withAnimation` 都收敛到本函数：内容身份只有一个
+ * 计算点，于是"改场景"与"改动画"不会各自发明一套"是否算变化"的判据。
+ */
+export function withContent(
+  doc: Document,
+  scene: Scene,
+  animation: AnimationState,
+  content: DocumentContent = doc.content,
+): { doc: Document; changed: boolean; version: Version } {
+  const nextContent = contentDigestOf(scene, animation, content)
+  const curContent = doc.version.contentVersion ?? 0
+  if (nextContent === curContent) {
+ // 内容相同：保持**原版本对象身份**，不推进任何计数。
+    return { doc: Object.freeze({ ...doc, scene, animation, content }), changed: false, version: doc.version }
+  }
+  const nextVersion = version(doc.version.documentVersion + 1, nextContent)
+  return { doc: Object.freeze({ ...doc, scene, animation, content, version: nextVersion }), changed: true, version: nextVersion }
+}
+
+/**
+ * 只替换**文档内容的其余三块**（元数据/帧时长轴/资源引用）。
+ *
+ * 与 `withScene`/`withAnimation` 收敛到同一个 `withContent` ——
+ * 「什么算内容变化」仍然只有一个判据（见 `contentOf` 的说明）。
+ *
+ * 为什么需要这个具名入口而不是让调用方拼一个 `withContent(doc, doc.scene, doc.animation, next)`：
+ * 后者要写三遍「保持不变的那两块」，而任何一处写错（例如误传 `doc.animation` 为
+ * `EMPTY_ANIMATION`）都会**静默清空**一块内容。具名入口让「只改这三块」是结构事实。
+ */
+export function withDocumentContent(doc: Document, content: DocumentContent): { doc: Document; changed: boolean; version: Version } {
+  return withContent(doc, doc.scene, doc.animation, content)
+}
+
+/** 替换动画状态（内容身份判据与 `withScene` 同一处）。 */
+export function withAnimation(doc: Document, animation: AnimationState): { doc: Document; changed: boolean; version: Version } {
+  return withContent(doc, doc.scene, animation, doc.content)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 历史记账
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface PushHistoryInput {
+  readonly label: string
+  readonly beforeScene: Scene
+  readonly beforeVersion: Version
+  readonly afterScene: Scene
+  readonly afterVersion: Version
+  readonly changes: ChangeSummary
+  readonly selectionBefore?: readonly EntityRef[]
+  readonly selectionAfter?: readonly EntityRef[]
+/** 该条目改动的动画状态（缺省 = 未改动画）。 */
+  readonly beforeAnimation?: AnimationState
+  readonly afterAnimation?: AnimationState
+/** 该条目改动的文档内容三块（缺省 = 未改内容三块）。 */
+  readonly beforeContent?: DocumentContent
+  readonly afterContent?: DocumentContent
+}
+
+/**
+ * 记一条历史。
+ *
+ * 返回 `null` 表示**拒绝记账**，且必须由调用方如实报告为"无历史产生"：
+ * - 内容身份未变（净零往返 / 拒绝后仍记账 / 取消）；
+ * - 只改了选择（已批准方向：「不把单次点选和观察机位纳入文档历史」）。
+ *
+ * 这条 `null` 是 「无无效历史」的可执行落点。
+ */
+export function pushHistory(h: HistoryState, input: PushHistoryInput): HistoryState | null {
+  if (sameContent(input.beforeVersion, input.afterVersion)) return null
+  const entry: HistoryEntry = Object.freeze({
+    label: input.label,
+    beforeScene: input.beforeScene,
+    afterScene: input.afterScene,
+    beforeVersion: input.beforeVersion,
+    afterVersion: input.afterVersion,
+    changes: input.changes,
+    selectionBefore: Object.freeze([...(input.selectionBefore ?? [])]),
+    selectionAfter: Object.freeze([...(input.selectionAfter ?? [])]),
+    ...(input.beforeAnimation === undefined ? {} : { beforeAnimation: input.beforeAnimation }),
+    ...(input.afterAnimation === undefined ? {} : { afterAnimation: input.afterAnimation }),
+    ...(input.beforeContent === undefined ? {} : { beforeContent: input.beforeContent }),
+    ...(input.afterContent === undefined ? {} : { afterContent: input.afterContent }),
+  })
+  const past = [...h.past, entry]
+ // 超深时丢弃最旧条目（**不**静默丢弃最新，否则"刚做的操作撤不回"）
+  while (past.length > h.maxDepth) past.shift()
+  return Object.freeze({ past: Object.freeze(past), future: Object.freeze([]), maxDepth: h.maxDepth })
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 撤销 / 重做
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface HistoryStepResult {
+  readonly doc: Document
+  /** 应用后应发布的相关选择（已按**当前场景**解析，失效项在内）。 */
+  readonly selection: readonly EntityRef[]
+  /** 被丢弃的失效引用（诊断用；「无悬空引用」）。 */
+  readonly droppedReferences: readonly EntityRef[]
+}
+
+/**
+ * 选择引用解析：只保留在当前场景里**仍然存在**的引用。
+ *
+ * 「撤销时根据当前有效对象解析」。⇒ 不照搬旧条目里的选择，
+ * 而是对着**应用后的新场景**逐条验证；失效项进入 `dropped` 而不是被静默保留
+ * （负对照「回放旧选择直接引用已失效对象」必须判红）。
+ */
+export function resolveSelection(scene: Scene, refs: readonly EntityRef[]): { resolved: readonly EntityRef[]; dropped: readonly EntityRef[] } {
+  const resolved: EntityRef[] = []
+  const dropped: EntityRef[] = []
+  for (const r of refs) {
+    if (r.kind === 'object') {
+      if (findObject(scene, r.id)) resolved.push(r)
+      else dropped.push(r)
+    } else {
+ // 非对象引用（文档/上下文/资源）不由场景存在性判定，原样保留。
+      resolved.push(r)
+    }
+  }
+  return { resolved: Object.freeze(resolved), dropped: Object.freeze(dropped) }
+}
+
+/** 撤销一步。返回 `null` 表示无历史可撤（调用方应报告 `unchanged`，不报错）。 */
+export function undo(doc: Document): HistoryStepResult | null {
+  const entry = doc.history.past[doc.history.past.length - 1]
+  if (!entry) return null
+  const { resolved, dropped } = resolveSelection(entry.beforeScene, entry.selectionBefore)
+  const next: Document = Object.freeze({
+    ...doc,
+    scene: entry.beforeScene,
+ // 该条目改过动画则一并回退；没改则保持当前动画（不是"清空"，那会丢别的条目的效果）。
+    animation: entry.beforeAnimation ?? doc.animation,
+ // 内容三块同一处置：没改则保持当前值。
+    content: entry.beforeContent ?? doc.content,
+    version: entry.beforeVersion,
+    history: Object.freeze({
+      past: Object.freeze(doc.history.past.slice(0, -1)),
+      future: Object.freeze([...doc.history.future, entry]),
+      maxDepth: doc.history.maxDepth,
+    }),
+  })
+  return Object.freeze({ doc: next, selection: resolved, droppedReferences: dropped })
+}
+
+/** 重做一步。 */
+export function redo(doc: Document): HistoryStepResult | null {
+  const entry = doc.history.future[doc.history.future.length - 1]
+  if (!entry) return null
+  const { resolved, dropped } = resolveSelection(entry.afterScene, entry.selectionAfter)
+  const next: Document = Object.freeze({
+    ...doc,
+    scene: entry.afterScene,
+    animation: entry.afterAnimation ?? doc.animation,
+    content: entry.afterContent ?? doc.content,
+    version: entry.afterVersion,
+    history: Object.freeze({
+      past: Object.freeze([...doc.history.past, entry]),
+      future: Object.freeze(doc.history.future.slice(0, -1)),
+      maxDepth: doc.history.maxDepth,
+    }),
+  })
+  return Object.freeze({ doc: next, selection: resolved, droppedReferences: dropped })
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 保存基线与 dirty
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 文档是否脏。
+ *
+ * 判据 = **内容身份**与保存基线是否相等（契约 §1.4）。
+ * 因此"撤销回实际保存内容 ⇒ 干净"自动成立，无需任何补偿逻辑。
+ */
+export function isDirty(doc: Document): boolean {
+  return !sameContent(doc.version, doc.saveBaseline)
+}
+
+/** 内容身份是否与基线逐位相同（含世代；供严格对账）。 */
+export function isPristine(doc: Document): boolean {
+  return sameVersion(doc.version, doc.saveBaseline)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 保存目标写入串行化（核心政策；适配器接入归）
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 一次保存请求的**不可变快照**。
+ *
+ * 「保存捕获已提交快照、文档身份、源绑定代数和保存序号」。
+ * `bindingGeneration` 是"源绑定代数"——文档被关闭/重绑后它推进，
+ * 使迟到的完成事件可被识别为过期（负对照「旧绑定不被污染」）。
+ */
+export interface SaveRequest {
+  readonly sequence: number
+  readonly documentId: string
+  readonly bindingGeneration: number
+  /** 捕获时的内容身份（捕获快照）。 */
+  readonly capturedVersion: Version
+  readonly capturedScene: Scene
+  /**
+ * 捕获时的**文档内容三块**。
+ *
+ * 为什么必须一并捕获：保存要求捕获「已提交快照」。若快照只带 `scene`，
+ * 那么「保存期间改了元数据/纹理」这件事在**写出的产物里**丢失 ——
+ * 产物会是一份「场景是捕获快照、元数据是最新」的混合体，而它与任何一次真实提交都不对应。
+ * 这正是负对照「隐式读取最新文档」在保存面上的同族形态。
+ */
+  readonly capturedContent: DocumentContent
+}
+
+/** 保存台账：串行化与竞态判定的**纯**状态。 */
+export interface SaveLedger {
+  readonly nextSequence: number
+  readonly inFlight: SaveRequest | null
+  /** 已成功落地的最高序号。 */
+  readonly committedSequence: number
+  readonly bindingGeneration: number
+}
+
+export function createSaveLedger(): SaveLedger {
+  return Object.freeze({ nextSequence: 1, inFlight: null, committedSequence: 0, bindingGeneration: 0 })
+}
+
+/**
+ * 发起一次保存。**已有在途写入时返回 `null`** ——
+ * 「每个保存目标写入**串行化**，或由远端条件版本控制保证顺序；
+ * 仅忽略旧响应不足以阻止旧请求最后覆盖远端」。
+ *
+ * ⇒ 本实现选择**串行化**（前一个未完成就不发下一个），而不是"允许并发再忽略旧响应"。
+ * 这就是负对照「仅忽略响应却允许旧请求覆盖远端」在核心层的落点。
+ */
+export function beginSave(ledger: SaveLedger, doc: Document, bindingGeneration: number): { ledger: SaveLedger; request: SaveRequest } | null {
+  if (ledger.inFlight !== null) return null
+  const request: SaveRequest = Object.freeze({
+    sequence: ledger.nextSequence,
+    documentId: doc.id,
+    bindingGeneration,
+    capturedVersion: doc.version,
+    capturedScene: doc.scene,
+    capturedContent: doc.content,
+  })
+  return {
+    ledger: Object.freeze({ ...ledger, nextSequence: ledger.nextSequence + 1, inFlight: request, bindingGeneration }),
+    request,
+  }
+}
+
+/** 结算结果。`committed` 表示远端确实接受了这次写入。 */
+export type SaveOutcome =
+  | { readonly kind: 'committed' }
+  | { readonly kind: 'failed'; readonly code: string }
+  | { readonly kind: 'superseded' }
+
+/**
+ * 保存完成事件。
+ *
+ * 三条判据（缺一即 负对照）：
+ * 1. 结束的必须是**在途**的那一次（序号相符）；
+ * 2. **绑定代数相符** —— 文档已关闭/重绑则旧完成事件不得回写（`superseded`）；
+ * 3. 只有 `committed` 才推进保存基线，且基线取**该请求捕获的已提交快照**
+ * （不是"当前版本"——保存期间的新编辑仍应脏）。
+ * 失败**不改基线**（明文）。
+ */
+export function completeSave(
+  ledger: SaveLedger,
+  doc: Document,
+  request: SaveRequest,
+  outcome: SaveOutcome,
+  currentBindingGeneration: number,
+): { ledger: SaveLedger; doc: Document; applied: boolean } {
+  if (ledger.inFlight === null || ledger.inFlight.sequence !== request.sequence) {
+    return { ledger, doc, applied: false }
+  }
+  const released: SaveLedger = Object.freeze({ ...ledger, inFlight: null })
+  if (request.bindingGeneration !== currentBindingGeneration) {
+ // 旧绑定的完成事件：释放在途槽位，但**不**回写文档。
+    return { ledger: released, doc, applied: false }
+  }
+  if (outcome.kind !== 'committed') {
+    return { ledger: released, doc, applied: false }
+  }
+  const next: Document = Object.freeze({
+    ...doc,
+    saveBaseline: request.capturedVersion,
+    savedSequence: request.sequence,
+  })
+  return {
+    ledger: Object.freeze({ ...released, committedSequence: Math.max(released.committedSequence, request.sequence) }),
+    doc: next,
+    applied: true,
+  }
+}
+
+/**
+ * 关闭文档 / 重绑源：推进绑定代数并丢弃在途写入。
+ *
+ * 「文档关闭也释放租约、取消归属作业。**资源加载回调不能重新激活已关闭的交互**」。
+ * 推进代数使任何迟到回调都无法命中当前绑定。
+ */
+export function rebindSaveLedger(ledger: SaveLedger): SaveLedger {
+  return Object.freeze({ ...ledger, bindingGeneration: ledger.bindingGeneration + 1, inFlight: null })
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 三类真实对象的最小构造（「方块、注解框、相机三类真实对象类型」）
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** 在场景里放一个方块对象（数据为 `blockGrid`）。 */
+export function addBlockObject(
+  scene: Scene,
+  init: { objectId: string; dataId: string; name?: string; cells?: Readonly<Record<string, string>> },
+): Scene | null {
+  return withObject(
+    scene,
+    sceneObject({ id: init.objectId, type: 'block', dataId: init.dataId, ...(init.name === undefined ? {} : { name: init.name }) }),
+    objectData(init.dataId, { kind: 'blockGrid', cells: init.cells ?? {} }, 'document'),
+  )
+}
+
+/** 在场景里放一个注解框对象。 */
+export function addAnnotationObject(
+  scene: Scene,
+  init: { objectId: string; dataId: string; name?: string; shape?: 'box' | 'point' | 'line' | 'text' | 'face'; text?: string },
+): Scene | null {
+  const payload = init.text === undefined ? { kind: 'annotation' as const, shape: init.shape ?? 'box' } : { kind: 'annotation' as const, shape: init.shape ?? 'box', text: init.text }
+  return withObject(
+    scene,
+    sceneObject({ id: init.objectId, type: 'annotation', dataId: init.dataId, ...(init.name === undefined ? {} : { name: init.name }) }),
+    objectData(init.dataId, payload, 'document'),
+  )
+}
+
+/** 在场景里放一个相机对象（相机参数属文档；观察视角属编辑器实例，见 §3.1）。 */
+export function addCameraObject(
+  scene: Scene,
+  init: { objectId: string; dataId: string; name?: string; projection?: 'perspective' | 'orthographic'; fov?: number; clipStart?: number; clipEnd?: number },
+): Scene | null {
+  return withObject(
+    scene,
+    sceneObject({ id: init.objectId, type: 'camera', dataId: init.dataId, ...(init.name === undefined ? {} : { name: init.name }) }),
+    objectData(
+      init.dataId,
+      {
+        kind: 'camera',
+        projection: init.projection ?? 'perspective',
+        fov: init.fov ?? 50,
+        clipStart: init.clipStart ?? 0.1,
+        clipEnd: init.clipEnd ?? 1000,
+      },
+      'document',
+    ),
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 网格对象
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 在场景里放一个网格对象。
+ *
+ * 与另外三个构造子的区别：网格的载荷是**结果类型**（`unitBoxMesh` 会校验拓扑），
+ * 故本函数返回 `Result` 而不是 `Scene | null` —— 一个失败原因不同的构造不该
+ * 被压成同一个 `null`（「不能用默认值掩盖缺失」的同族要求：
+ * 也不该用同一个哨兵值掩盖不同的失败）。
+ */
+export function addMeshObject(
+  scene: Scene,
+  init: {
+    objectId: string
+    dataId: string
+    name?: string
+    transform?: Transform
+    size?: number
+    deformation?: Deformation
+  },
+): Result<Scene> {
+  const mesh = unitBoxMesh(init.dataId, init.size ?? 1, init.deformation)
+  if (!mesh.ok) return mesh
+  const data = objectData(init.dataId, Object.freeze({ kind: 'mesh' as const, mesh: mesh.value }), 'document')
+  const obj = sceneObject({
+    id: init.objectId,
+    type: 'mesh',
+    dataId: init.dataId,
+    ...(init.name === undefined ? {} : { name: init.name }),
+    ...(init.transform === undefined ? {} : { transform: init.transform }),
+  })
+  const next = withObject(scene, obj, data)
+  if (next === null) return err(invalidValue({ reason: 'idCollision', objectId: init.objectId, dataId: init.dataId }))
+  return ok(next)
+}
+
+/**
+ * 让一个网格对象**共享**另一对象的几何数据（夹具构造用）。
+ *
+ * 这是"共享"的**唯一**构造入口：共享关系由显式调用建立，不是巧合的别名。
+ * 于是"共享几何默认按对象独立编辑"的测试可以精确控制共享的发生时机。
+ */
+export function shareMeshData(scene: Scene, objectId: string, sourceObjectId: string): Result<Scene> {
+  const obj = findObject(scene, objectId)
+  if (!obj) return err(missingTarget({ objectId }))
+  const src = findObject(scene, sourceObjectId)
+  if (!src) return err(missingTarget({ objectId: sourceObjectId }))
+  if (!findObjectData(scene, src.dataId)) return err(missingTarget({ dataId: src.dataId }))
+  return ok(Object.freeze({ ...scene, objects: Object.freeze({ ...scene.objects, [objectId]: Object.freeze({ ...obj, dataId: src.dataId }) }) }))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 小工具（供命令层复用）
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** 从对象 id 造 `EntityRef`（含当前内容版本，供 `StaleReference` 判定）。 */
+export function objectEntityRef(scene: Scene, objectId: string): EntityRef | undefined {
+  const obj = findObject(scene, objectId)
+  if (!obj) return undefined
+  const data = scene.data[obj.dataId]
+  return objectRef(objectId, data?.contentVersion ?? contentDigest(obj.dataId))
+}
+
+/** 造一个"内容为空"的变更摘要（`unchanged` 分支用）。 */
+export function noChange(): ChangeSummary {
+  return changeSummary({ structurallyShared: true })
+}
+
+/** 文档自身引用。 */
+export function documentEntityRef(doc: Document): EntityRef {
+  return entityRef('document', doc.id, doc.version.contentVersion)
+}
+
+/** 版本零的便捷引用（测试夹具用）。 */
+export const ZERO = VERSION_ZERO
