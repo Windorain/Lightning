@@ -1,0 +1,43 @@
+Lightning — Third-Party Notices
+================================
+
+Original content
+----------------
+Original Lightning source code, documentation, and original assets authored for
+this repository are licensed under the MIT License, Copyright (c) 2026
+Windorain. Full text: LICENSE (repository root).
+
+JetBrains Mono
+--------------
+  web/src/assets/fonts/JetBrainsMono-Regular.woff2
+  web/src/assets/fonts/JetBrainsMono-Medium.woff2
+  web/src/assets/fonts/JetBrainsMono-Bold.woff2
+
+  Copyright 2020 The JetBrains Mono Project Authors
+  (https://github.com/JetBrains/JetBrainsMono)
+  License: SIL Open Font License 1.1 (OFL-1.1)
+  License text: web/src/assets/fonts/OFL.txt
+
+Source: the local dependency package @fontsource/jetbrains-mono 5.2.8
+("license": "OFL-1.1" in its package.json), declared in web/package.json. The
+three bundled files are byte-identical to the Latin subset files of that
+package, renamed only: files/jetbrains-mono-latin-400-normal.woff2,
+-500-normal.woff2, -700-normal.woff2. They are redistributed unmodified.
+
+GTNH mod subtree
+----------------
+mod/gtnh/ carries its own MIT license file mod/gtnh/LICENSE (Copyright (c)
+2026 Windorain), retained for subtree distribution.
+
+Gradle Wrapper
+--------------
+  mod/gtnh/gradle/wrapper/gradle-wrapper.jar
+
+  License: Apache License 2.0 (SPDX-License-Identifier: Apache-2.0 in the
+  JAR manifest). The upstream license text is included as META-INF/LICENSE
+  in the JAR.
+
+Scope
+-----
+Any further third-party component requires separate verification; no texture
+is claimed cleared.

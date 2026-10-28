@@ -1,0 +1,25 @@
+# CI 入口 —— **仅手动触发，不执行任何检查**。
+#
+# 规则：
+#   - 本工作流只保留 `workflow_dispatch`：在真实检查（web 单测 / 构建 / mod 编译）
+#     落地之前，push 触发的作业只会长期排队或跑出无意义的绿，制造僵尸 run 与假红；
+#   - 作业内容只有一行说明，不得声称已运行测试、构建或编译；
+#   - 本文件必须始终是语法 + schema 合法的 workflow：纯注释文件会被解析为 EOF，
+#     报「工作流配置无效」并在每次 push 记一条 failure run。
+# Web 依赖安装统一用 pnpm（见 `web/package.json` 的 `packageManager` 与 `web/pnpm-lock.yaml`）；
+# 实装流水线时用 corepack/pnpm 做 frozen 安装，不要走 npm ci。
+name: CI
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  placeholder:
+    name: 占位（不执行检查）
+    runs-on: ubuntu-latest
+    steps:
+      - name: 说明
+        run: echo "CI 尚未实现：本工作流仅手动触发，不执行测试或构建。"

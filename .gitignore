@@ -1,0 +1,76 @@
+node_modules/
+dist/
+dist-workbench/
+dist-wiki-workbench/
+*.local
+.DS_Store
+Thumbs.db
+
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+*.class
+*.jar
+*.war
+
+# 保留嵌套 Mod 树的 Gradle wrapper 引导器（否定规则必须位于 `*.jar` 之后）
+!mod/gtnh/gradle/wrapper/gradle-wrapper.jar
+
+# IDE
+.idea/
+.vscode/
+.cursor/
+*.iml
+.claude/
+CLAUDE.md
+
+# Generated protobuf output
+web/src/render/proto/lightning/v1/
+web/src/render/proto/lightning/v2/
+
+# Wiki 构建导出副本（源文件在 web/dist/，npm run build:embed）
+scripts/huiji/wiki-export/
+
+# Test artifacts
+web/test-artifacts/
+web/test-results/
+web/e2e/screenshots/
+.worktrees/
+.superpowers/
+
+# 多方块 fixture 校验器输出（可再生）
+scripts/multiblock-fixtures/.out/
+
+scripts/multiblock-encode/.out/
+
+# 游戏内自动导出管线的归档与日志（可再生）
+scripts/multiblock-pipeline/.out/
+
+scripts/acceptance/.out/
+
+# Wiki 错材质审计输出（可再生，产物不入库）
+scripts/wiki-material-audit/.out/
+
+# 控制面导出验收证据与 esbuild 临时捆绑（可再生）
+scripts/control-plane/.out/
+
+# Python 缓存（可再生）
+__pycache__/
+*.pyc
+
+# 本地工作区配置（各工作区自行维护）
+.gitea/
+
+# volume-profile 的剖析输出（md/json/csv）：analyse 子命令的 --md/--json/--csv 落点，逐字节可复现
+scripts/volume-profile/out/
+
+# volume-profile 的合成样例：synth 子命令可逐字节复现（默认落点即此目录）
+scripts/volume-profile/samples/
+
+# 本地工作台截图（非正式资产）
+web/workbench-screenshot.png
+
+# 本机真实夹具根（.env 不入库；布局见 .env.example）
+.env
+!.env.example
