@@ -1,0 +1,77 @@
+/**
+ * Context 状态访问公约（与设计约定一致：业务改写走 Operator）。
+ *
+ * ## Setting 聚类（按语义归属，Context 只代理）
+ *
+ * | 簇 | Owner | Context 入口 |
+ * |----|--------|----------------|
+ * | shell | `wm.settings` | `getShellSettings()` — 主题、语言 |
+ * | chrome | `wm.chrome` | `ctx.wm.chrome` — 瞬时菜单等 |
+ * | tool | `REGION.WORKBENCH_TOOLSHELF` / `REGION.EMBED` → `state.tool` | `getToolSettings()` 或 `requireRegion` |
+ * | session | `ScreenRoot.session` | `getSession()` |
+ * | wiki 发布壳 | `Main.embedPublish` | `OPERATOR_SET_WIKI_CONFIG` |
+ * | 嵌入初始视角 | `doc.meta.embed_initial_view` / `Main.embedInitialView` | 嵌入配置面板「同步预览视角到文档」 |
+ * | viewer | 视口 Region → `state.viewer` | `requireRegion(REGION.*_VIEWPORT\|EMBED)` |
+ * | keymap | Region `keymapId` | `resolveRegionBaseKeymap`（`keymapHandler`） |
+ *
+ * ## 访问形态
+ *
+ * - Vue 响应式：`getX(): Ref<T>` — 读/写 `.value`（写仅 Operator）
+ * - reactive 记录：`getX(): T` — 同一代理引用（如 session.connection）
+ * - 服务单例：`getX(): T` — selection、operators 等
+ *
+ * 禁止 property getter 返回 primitive 快照；禁止 get/set 冒充 Ref。
+ */
+
+import type { Ref } from 'vue'
+import type { ShallowRef } from 'vue'
+import type { ConnectionState, WorkbenchWorkspaceMode, UIWorkspace } from '@/runtime/types'
+import type { DocumentBinding } from '@/workbench/document/types'
+export type AppTheme = 'dark' | 'light'
+export type AppLanguage = 'zh' | 'en'
+
+/**
+ * WM 壳层偏好（主题、语言）—— **实例作用域**。
+ *
+ * 改动：本接口原先是这里独立定义的 `{ theme: Ref; lang: Ref }`，
+ * 与 `runtime/shellSettings.ts` 的实际实现**两份定义**。把实现改成实例作用域
+ * （`t()`、`scopeId`、`scopeAttrs`、`setLang`/`setTheme`）后，两份定义必须合一 ——
+ * 否则调用点按旧类型写 `settings.lang.value = x`（绕过实例 setter）也能通过类型检查，
+ * 而运行期并不生效（`lang` 是内部 ref，赋值不再触发持久化路径）。
+ *
+ * ⇒ 现在从实现处**单一定义、单一导出**：消费者只看到一份契约。
+ */
+export type { ShellSettings, CreateShellSettingsOptions } from '@/runtime/shellSettings'
+
+/** 工具会话参数（笔刷等） */
+export interface ToolSettings {
+  replaceBrush: Ref<string | null>
+  fillBrush: Ref<string | null>
+  generateType: Ref<string | null>
+  snapEnabled: Ref<boolean>
+  dragSensitivity: number
+  confirmDirty: (message: string) => boolean
+}
+
+/** Workbench 编辑/连接/视口会话（非持久壳偏好） */
+export interface WorkbenchSession {
+  workspaceMode: Ref<WorkbenchWorkspaceMode>
+  uiWorkspace: Ref<UIWorkspace>
+  localFileName: Ref<string | null>
+  documentBinding: ShallowRef<DocumentBinding>
+  connection: ConnectionState
+  layerWorldY: Ref<number>
+}
+
+/** Region 节点状态袋（挂载时由 ScreenRoot 工厂写入） */
+export interface RegionState {
+  tool?: ToolSettings
+  viewer?: import('@/viewer/preferences').ViewerPreferences
+  hover?: import('@/runtime/hover').ViewportHoverState
+  [key: string]: unknown
+}
+
+/** Embed 查看器会话（Screen 根 session） */
+export interface EmbedSession {
+  layerWorldY: Ref<number>
+}
