@@ -1,0 +1,159 @@
+/*
+ * 与 MyCTMLib 相同：由 gtnhconvention 引入。Gson 用于写出 Wiki v6 JSON。
+ *
+ * runClient/runServer 额外模组：使用 runtimeOnlyNonPublishable，不写入发布 POM。
+ * 版本与 GT5-Unofficial 的 api 依赖及 gradle.properties 中 gtnhRun.gt5Version 对齐。
+ *
+ * 依赖基线分层：gtnhRun.runtimeProfile 一键切换——
+ *   legacy（默认）：既有基线 GT 5.09.52.283 / StructureLib 1.4.28 / GTNHLib 0.9.62，无 Angelica，
+ *         ID 扩展用 NotEnoughIds 2.1.10；ForestryMC 4.11.15；
+ *   ctm：验收基线 GT 5.09.54.194 / StructureLib 1.4.45 / GTNHLib 0.11.52 + Angelica 2.2.16
+ *        （maven release，含 compact CTM）；GT 5.09.54.194 传递引入 EndlessIDs，故该档不装 NotEnoughIds。
+ *        GT 5.09.54.36+ 才含 antimatterglass CTM 规则，
+ *        且 CTM 机制由 Angelica 提供——两者缺一缺陷不显现。
+ *        ForestryMC 分档到 4.11.38（与 GT 5.09.54.194 的 apiElements 声明对齐，见下方林业条目注释）。
+ * 单版本仍可用 gtnhRun.gt5Version / gtnhRun.structureLibVersion / gtnhRun.gtnhLibVersion 显式覆盖。
+ */
+def runtimeProfile = (project.findProperty("gtnhRun.runtimeProfile") ?: "legacy").toString()
+def profileDefaults = [
+    legacy: [gt5: "5.09.52.283", structureLib: "1.4.28", gtnhLib: "0.9.62", angelica: null, notEnoughIds: "2.1.10", forestry: "4.11.15", nhcm: "2.8.142"],
+    ctm   : [gt5: "5.09.54.194", structureLib: "1.4.45", gtnhLib: "0.11.52", angelica: "2.2.16", notEnoughIds: null, forestry: "4.11.38", nhcm: null],
+]
+def prof = profileDefaults[runtimeProfile]
+if (prof == null) {
+    throw new GradleException("未知 gtnhRun.runtimeProfile: ${runtimeProfile}（可选: ${profileDefaults.keySet()}）")
+}
+
+dependencies {
+    def gt5Ver = (project.findProperty("gtnhRun.gt5Version") ?: prof.gt5).toString()
+    // StructureLib 编译/运行版本；必须与 GT5U 声明的版本一致（GT5U 5.09.52.283 -> StructureLib 1.4.28；
+    // GT5U 5.09.54.194 -> StructureLib 1.4.45）
+    def structureLibVer = (project.findProperty("gtnhRun.structureLibVersion") ?: prof.structureLib).toString()
+
+    implementation("com.google.code.gson:gson:2.8.9")
+
+    // 编译期 API（多方块导出用）：与运行期同坐标同版本，仅新增编译期可见性，运行期装配不变
+    // 决策依据：编译期只需该 jar 的公开签名，运行期仍由整合包提供同一坐标同版本
+    // transitive=false：GTNH maven 上部分间接依赖（如 CodeChickenLib:1.3.0）坐标已漂移不可解析；
+    // 编译只需本 jar，缺失的间接类型按需在下方逐个补 compileOnly。
+    compileOnly("com.github.GTNewHorizons:GT5-Unofficial:${gt5Ver}:dev") { transitive = false }
+    compileOnly("com.github.GTNewHorizons:StructureLib:${structureLibVer}:dev") { transitive = false }
+
+    // 探针实际引用到的「间接类型」：它们出现在 GT5U 公开签名/接口继承链上，transitive=false 后必须显式补。
+    //   com.gtnewhorizon.gtnhlib.capability.CapabilityProvider        <- IMetaTileEntity extends
+    //   com.cleanroommc.modularui.api.IGuiHolder                      <- IMetaTileEntity extends
+    //   appeng.api.crafting.ICraftingIconProvider                     <- BlockMachines/ItemMachines 继承链
+    // 版本取 `gradlew dependencies --configuration runtimeClasspath` 的实际解析结果，保证编译期/运行期锁步。
+    def gtnhLibVer = (project.findProperty("gtnhRun.gtnhLibVersion") ?: prof.gtnhLib).toString()
+    compileOnly("com.github.GTNewHorizons:GTNHLib:${gtnhLibVer}:dev") { transitive = false }
+    compileOnly("com.github.GTNewHorizons:ModularUI2:2.3.43-1.7.10:dev") { transitive = false }
+    compileOnly("com.github.GTNewHorizons:Applied-Energistics-2-Unofficial:rv3-beta-834-GTNH:dev") { transitive = false }
+
+    // GregTech 5 + NEI 等（GT5 仓库 dependencies.gradle 中 api/implementation 条目的运行时装载）
+    runtimeOnlyNonPublishable("com.github.GTNewHorizons:GT5-Unofficial:${gt5Ver}:dev")
+    runtimeOnlyNonPublishable("com.github.GTNewHorizons:StructureLib:${structureLibVer}:dev")
+
+    // GTNH 核心模组（NewHorizonsCoreMod，modid=dreamcraft）：补齐本 dev 实例缺失的**成品配方**。
+    // 依据（配方缺席的根因）：GT5U 只在材料显式调用 .addElectrolyzerRecipe() 时才自动生成电解配方
+    // （MaterialsInit.loadMagnesia() 未开闸），「Magnesia -> Magnesium + Oxygen」这条只由
+    // NewHorizonsCoreMod 的 gthandler/recipes/ElectrolyzerRecipes.java:72-77 注册；不装载它 ⇒ 该配方在 NEI 与实机都不存在。
+    // 版本锁步（不得随手升级）：NHCM 2.8.140 / 2.8.142 的 dependencies.gradle 钉 GT5-Unofficial 5.09.52.283，
+    // 2.8.143 起跳到 5.09.52.288，2.8.147 跳到 5.09.52.294 ⇒ 与 gtnhRun.gt5Version=5.09.52.283 配套的是 2.8.142。
+    // 升级 GT5U 时必须同步复核本行，否则会出现同族的 NoSuchMethodError（GT5U 与 NHCM 的 GT 版本锁步被打破）。
+    // ctm 档不装 NHCM 2.8.142：该版本钉 GT 5.09.52.283，缺 GT 5.09.54.194
+    // 期望的 Piko/Quantum/PlanckCircuit（tectech MTEHatchRack 在 NHCM 已加载时无条件 getModItem 读它们 ⇒
+    // null ⇒ tectech init NPE ⇒ gtnhintergalactic 连坐跳过 ⇒ PlanetarySiphon 未 set ⇒ GT init 崩）。
+    // 验收按同期基线（无 NHCM，87 mods）复原；另一棵验收树同结论。
+    if (prof.nhcm != null) {
+        runtimeOnlyNonPublishable("com.github.GTNewHorizons:NewHorizonsCoreMod:${prof.nhcm}:dev")
+    }
+    // 保持 GT5U 5.09.52.283 声明的 828 坐标；实际替换到哪个 CF 文件见文件末尾
+    // configurations.all（gtnhconvention 默认会替换到自报 827 的旧 CF 2353971）。
+    runtimeOnlyNonPublishable("net.industrial-craft:industrialcraft-2:2.2.828-experimental:dev")
+    runtimeOnlyNonPublishable("com.github.GTNewHorizons:NotEnoughItems:2.8.68-GTNH:dev")
+    runtimeOnlyNonPublishable("com.github.GTNewHorizons:GTNHLib:${gtnhLibVer}:dev")
+    // NotEnoughIds 与 EndlessIDs 互斥：EndlessIDs 启动即 FATAL（"EndlessIDs replaces NotEnoughIDs!
+    // Please uninstall NotEnoughIDs!"）。ctm 档的 GT 5.09.54.194 传递引入 endlessids-mc1.7.10，
+    // ID 扩展角色由 EndlessIDs 接管，故该档不装 NotEnoughIds；legacy 档无 endlessids，行为不变。
+    if (prof.notEnoughIds != null) {
+        runtimeOnlyNonPublishable("com.github.GTNewHorizons:NotEnoughIds:${prof.notEnoughIds}:dev")
+    }
+    runtimeOnlyNonPublishable("com.github.GTNewHorizons:ModularUI:1.3.1:dev")
+    runtimeOnlyNonPublishable("com.github.GTNewHorizons:ModularUI2:2.3.43-1.7.10:dev")
+    runtimeOnlyNonPublishable("com.github.GTNewHorizons:waila:1.19.22:dev")
+    runtimeOnlyNonPublishable("com.github.GTNewHorizons:Applied-Energistics-2-Unofficial:rv3-beta-834-GTNH:dev")
+    runtimeOnlyNonPublishable("com.github.GTNewHorizons:AE2FluidCraft-Rework:1.5.58-gtnh:dev")
+    runtimeOnlyNonPublishable("com.github.GTNewHorizons:Postea:1.1.5:dev")
+    runtimeOnlyNonPublishable("com.github.GTNewHorizons:Hodgepodge:2.7.62:dev")
+    // 与 GT5-Unofficial dependencies.gradle 中 BloodMagic 条目对齐（血魔法）
+    runtimeOnlyNonPublishable("com.github.GTNewHorizons:BloodMagic:1.8.12:dev")
+
+    // 与 GT5-Unofficial dependencies.gradle 中 compileOnlyApi / runtime 测试条目对齐：末影接口（Ender IO）、红石工程（Project Red）
+    runtimeOnlyNonPublishable("com.github.GTNewHorizons:EnderIO:2.10.18:dev")
+    runtimeOnlyNonPublishable("com.github.GTNewHorizons:ProjectRed:4.12.24-GTNH:dev")
+    runtimeOnlyNonPublishable("com.github.GTNewHorizons:WirelessRedstone-CBE:1.7.5:dev")
+
+    // 植物魔法：Botania（仓库 github.com/GTNewHorizons/Botania）；运行需 Baubles-Expanded（与 GT5-Unofficial 中 Botania 条目版本对齐）
+    runtimeOnlyNonPublishable("com.github.GTNewHorizons:Baubles-Expanded:2.2.13-GTNH:dev")
+    runtimeOnlyNonPublishable("com.github.GTNewHorizons:Botania:1.13.16-GTNH:dev")
+
+    // 植物学：宾尼（Binnie，含 Botany / Genetics 等）；需林业（ForestryMC）作为 API 依赖
+    // 林业按档分叉版本（非「有无」，故直接插值）：
+    //   ctm 档取 4.11.38 —— 与 GT 5.09.54.194 的 apiElements 声明（ForestryMC 4.11.38）对齐。
+    //   实测该 GT jar 常量池：gregtech/common/items/armor/MechArmorBase 引用
+    //   forestry.api.apiculture.IArmorApiaristMulti，而该接口 ForestryMC 4.11.30 才引入
+    //   （4.11.15 jar 无此条目）；preInit 经 LoaderGTBlockFluid 路径加载该类，缺接口即抛
+    //   NoClassDefFoundError: forestry/api/apiculture/IArmorApiaristMulti（崩溃栈帧落其 :185）。
+    //   legacy 档保持 4.11.15：实测 GT 5.09.52.283 全 jar 无该接口引用，行为不变。
+    runtimeOnlyNonPublishable("com.github.GTNewHorizons:ForestryMC:${prof.forestry}:dev")
+    runtimeOnlyNonPublishable("com.github.GTNewHorizons:Binnie:2.6.24:dev")
+
+    // 物流管道（LogisticsPipes）：仅供 dev 客户端运行时放置 `logisticspipes.pipes.basic.LogisticsBlockGenericPipe`
+    // 方块（LP 管道 TileEntity 导出崩溃的验证）。验证代码只按注册名/反射触达 LP，故**不**加 compileOnly/implementation。
+    //
+    // 版本选择 1.5.28-GTNH（而非最新 1.5.36-GTNH），依据 LP 自己的 Gradle 模块元数据
+    // （https://nexus.gtnewhorizons.com/repository/public/com/github/GTNewHorizons/LogisticsPipes/<ver>/LogisticsPipes-<ver>.module）：
+    //   - 1.5.28 对 GTNHLib 只是约束 0.9.36 < 本树已解析的 0.9.62 → 不抬高 GTNHLib；
+    //   - 1.5.36 约束 GTNHLib 0.11.37，会把已锁定的 0.9.62 顶到 0.11.x（GT5U 5.09.52.283 的编译基线被打破），故不选。
+    // 传递依赖由 Gradle 自动解析（已实测）：BuildCraft 7.1.60（提供 BuildCraft|Core/Transport/Silicon/Robotics，
+    // LP 的 @Mod 硬依赖）、unimixins 0.2.1（提供 gtnhmixins）、NotEnoughItems 2.8.100-GTNH、ModularUI2 2.3.72-1.7.10。
+    // ⚠ 最后一项是下面 ModularUI2 锁版块的成因：LP 把 ModularUI2 顶到 2.3.72，而 GT5U 5.09.52.283 是按 2.3.41/2.3.43 编译的；
+    //   2.3.72 把 ToggleButton.background(IDrawable...) 改名为 backgroundOverlay(...) ⇒ 右键任意 GT 单方块机器时
+    //   在服务端构建 GUI 报 NoSuchMethodError、集成服崩。修法见文件末尾的 configurations.all 锁版块。
+    runtimeOnlyNonPublishable("com.github.GTNewHorizons:LogisticsPipes:1.5.28-GTNH:dev")
+
+    // ctm 基线：Angelica 提供 MCPatcher/CTM 实现（compact CTM 自 2.2.x 可用）；
+    // 无 Angelica 时 GT 的 CTM 规则不生效，CTM 缺陷不显现。Angelica 要求 GTNHLib>=0.11.36、
+    // unimixins 0.3.1（经传递元数据自动抬升）。版本选型：maven release 2.2.16（已验证含
+    // TileOverrideImpl$CTMCompact / CompactCtmQuadProcessor）；本地缓存 2.2.22-dev 仅作备用。
+    if (prof.angelica != null) {
+        runtimeOnlyNonPublishable("com.github.GTNewHorizons:Angelica:${prof.angelica}:dev")
+    }
+}
+
+// 🔴 ModularUI2 锁版（防传递依赖顶版打断 ToggleButton.background 的链接）
+// 背景：GT5U 5.09.52.283 编译期声明 api("ModularUI2:2.3.41-1.7.10")，本树 compileOnly 用 2.3.43，
+//       两个版本都有 ToggleButton.background(IDrawable...)；但 LogisticsPipes 1.5.28-GTNH 的传递依赖
+//       会把它顶到 2.3.72，而 2.3.72 已把该方法改名为 backgroundOverlay(IDrawable...) ⇒
+//       MTEBasicMachineBaseGui.createMufflerButton:204 链接失败 ⇒ 集成服务端线程崩。
+// 处置：强制锁回 2.3.43-1.7.10（= GT5U 编译期 API 面）。升级 GT5U / NHCM / LP 时必须重新复核本行。
+configurations.all {
+    resolutionStrategy {
+        force 'com.github.GTNewHorizons:ModularUI2:2.3.43-1.7.10'
+        // gtnhconvention 2.0.19 的默认替换会把 IC2 828 指向 CurseForge 2353971
+        // （2016-12-09 上传，mcmod.info 自报 2.2.827）；这里显式指向 2025-07-31 上传、
+        // 自报 2.2.828 的 CurseForge 6833054。两条规则都必须带 withoutClassifier()：
+        // 原坐标带 :dev，保留 classifier 会请求不存在的 *-dev.jar（CurseMaven 返回 400）。
+        // 第二条规则同时覆盖 convention 在关掉默认替换后仍直接加入
+        // reobfJarConfiguration / obfuscatedRuntimeClasspath 的旧 CF 2353971。
+        dependencySubstitution {
+            substitute module('net.industrial-craft:industrialcraft-2:2.2.828-experimental') using module('curse.maven:ic2-242638:6833054') withoutClassifier()
+            substitute module('curse.maven:ic2-242638:2353971') using module('curse.maven:ic2-242638:6833054') withoutClassifier()
+        }
+    }
+}
+
+// 把实际 IC2 构件注册进 RFG 的 SRG->MCP 去混淆流程（runtime/runClient 用 deobf；
+// reobf/obf 配置请求 srg，不会走此转换）。CF 828 原始 jar 仍是 SRG 名（如 func_145825_b），
+// 不注册时 runtimeClasspath 会拿到未转换的原始 jar 并直接进 runClient classpath。
+modUtils.deobfuscate("curse.maven:ic2-242638:6833054")
