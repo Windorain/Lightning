@@ -1,0 +1,218 @@
+syntax = "proto3";
+
+package lightning.v2;
+
+// Plain v2 — 完整场景数据，含 v2 新增字段
+message PlainSceneDocument {
+  string format_version = 1;          // "2.0"
+  SceneMeta meta = 2;
+  repeated WorldFrame frames = 3;
+  map<string, BlockState> block_palette = 4;
+  MaterialLibrary materials = 5;
+
+  // v2 新增
+  repeated AnnotationBox annotations = 6;
+  repeated Label labels = 7;
+  StatsTemplate stats_template = 8;
+}
+
+message SceneMeta {
+  string name = 1;
+  string author = 2;
+  int64 created_at_ms = 3;
+  string description = 4;
+  repeated string tags = 5;
+  BlockPos origin = 6;
+}
+
+message BlockPos {
+  int32 x = 1;
+  int32 y = 2;
+  int32 z = 3;
+}
+
+message WorldFrame {
+  string label = 1;
+  int32 index = 2;
+  repeated BlockInstance blocks = 3;
+  repeated EntityInstance entities = 4;
+}
+
+message BlockInstance {
+  BlockPos pos = 1;
+  string block_state_id = 2;
+  map<string, string> nbt = 3;
+  repeated BlockPart parts = 4;       // v2 新增
+  GuiState gui_state = 5;             // v2 新增
+}
+
+message BlockPart {
+  string local_id = 1;                // 父块内唯一标识（族命名空间："<族>:<族内定位符>"，见 format-parts-contract §4）
+  string part_tag = 2;                // 部件标记（语义定稿 = typeKey 跨格类型键/计数键，见契约 §5）
+  int32 direction = 3;                // -1=无, 0-5=DUNSWE, 6=CENTER（AE2 面语义；FMP 27 槽位走 local_id）
+  map<string, string> properties = 4; // 部件属性（族特有扩展点；强契约字段不得藏这里）
+  string tooltip = 5;                 // 独立 tooltip（优先级链导出时生成完毕）
+  repeated PartBox boxes = 6;         // 空间盒（多子盒；0-1 方块局部 Y-up，允许越界如实记录）
+  repeated PartItem items = 7;        // 物品身份（可合成物品；空 = 显式"无"）
+  string display_name = 8;            // 显示名（尊重游戏内显示名）
+  PartSource source = 9;              // 来源四元组（族/兜底/视觉或碰撞/档位）
+}
+
+// 部件空间盒：0-1 方块局部、MC 标准朝向 Y-up；允许超出 [0,1]³（如栅栏碰撞盒高 1.5）
+message PartBox {
+  repeated double min = 1;            // [x, y, z]
+  repeated double max = 2;            // [x, y, z]
+  string kind = 3;                    // "visual" | "collision"
+}
+
+// 部件物品身份（计数单位 = 可合成物品；FMP 材料等 NBT 区分进 nbt_discriminator，如 "mat=..."）
+message PartItem {
+  string registry = 1;
+  int32 damage = 2;
+  string nbt_discriminator = 3;
+  int32 count = 4;
+  string display = 5;               // 可选：物品条目显示名（附加条目无部件级 display_name 时用）
+}
+
+// 部件来源四元组
+message PartSource {
+  string family = 1;                  // 落盘枚举恒为 "ae2" | "eio" | "fmp" | "generic" | "inferred"（契约 §3/§10.2；旧文档里的 "enderio" 为历史写法，按 "eio" 读）
+  bool fallback = 2;                  // 是否兜底（族权威=false）
+  string box_provenance = 3;          // "both" | "collision-derived-visual" | "visual-only" | "collision-only" | "degenerate"
+  int32 tier = 4;                     // 1=族权威 2=通用盒 3=几何推断
+}
+
+message GuiState {
+  string layout_id = 1;
+  repeated ItemSlot item_slots = 2;
+  repeated FluidTank fluid_tanks = 3;
+  EnergyState energy = 4;
+  map<string, string> config = 5;
+}
+
+message ItemSlot {
+  int32 slot_index = 1;
+  string item_id = 2;
+  int32 count = 3;
+  int32 damage = 4;
+  map<string, string> nbt = 5;
+}
+
+message FluidTank {
+  int32 tank_index = 1;
+  string fluid_id = 2;
+  int64 amount_mb = 3;
+  int64 capacity_mb = 4;
+}
+
+message EnergyState {
+  int64 stored_eu = 1;
+  int64 capacity_eu = 2;
+}
+
+message BlockState {
+  string name = 1;
+  map<string, string> properties = 2;
+}
+
+message EntityInstance {
+  BlockPos pos = 1;
+  string entity_id = 2;
+  map<string, string> nbt = 3;
+}
+
+message MaterialLibrary {
+  repeated MaterialEntry entries = 1;
+}
+
+message MaterialEntry {
+  string key = 1;
+  bytes texture_png = 2;
+  string blend_mode = 3;
+  bool is_animated = 4;
+  int32 animation_ticks_per_frame = 5;
+  int32 animation_frame_count = 6;
+}
+
+message AnnotationBox {
+  string id = 1;
+  string title = 2;
+  string description = 3;             // Markdown
+  BlockPos min = 4;
+  BlockPos max = 5;
+  string color = 6;
+  bool visible = 7;
+  repeated PartRef part_refs = 8;     // 可选：定向注解 part
+  int64 created_at = 9;
+  int64 updated_at = 10;
+}
+
+message PartRef {
+  BlockPos block_pos = 1;
+  string part_local_id = 2;
+}
+
+message Label {
+  string id = 1;
+  string text = 2;
+  float x = 3;
+  float y = 4;
+  float z = 5;
+  string color = 6;
+  int32 font_size = 7;
+  bool visible = 8;
+}
+
+message StatsTemplate {
+  string mode = 1;                    // "auto" | "custom"
+  repeated StatsGroup groups = 2;
+  bool show_others = 3;
+}
+
+message StatsGroup {
+  string label = 1;
+  repeated StatsEntry entries = 2;
+}
+
+message StatsEntry {
+  string block_state_id = 1;
+  string label_override = 2;
+  string icon_source = 3;
+  string part_type_key = 4;           // 可选：部件视图条目键（= BlockPart.part_tag/typeKey）
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 物品索引表（契约《部件数据契约》§2.2）
+//
+// 契约口径（§10.1）：本文件是**规范 schema 文档**；两侧实现手写（Java Gson / TS 手写类型），
+// 本节只登记形状，不引入 Java 代码生成。JSON 落盘为 camelCase（字段名映射见各字段注释）。
+//
+// JSON 路径对应：
+//   * itemIndex                        → 文档根 `itemIndex`（World 文档挂 World 根，跨帧共享一份）
+//   * itemIndex[<物品身份键>]           → ItemIndexEntry；键 = `registry:damage[#nbt]`
+//   * itemIndex[k].attribution[i]      → ItemAttribution（归属定位；空数组 = 显式"无对应"）
+//   * blockPalette[j].hostItem         → HostItemIdentity（层② 宿主级物品身份，仅含部件文档写入）
+// ─────────────────────────────────────────────────────────────────────────────
+
+// 物品索引表条目（JSON：`itemIndex[<key>]`）
+message ItemIndexEntry {
+  string display = 1;                  // 显示名（JSON `display`）；缺省回退 = 物品身份键本身
+  repeated string tooltip = 2;         // 说明行（JSON `tooltip`；空 ⇒ 至少 display 一行）
+  string source = 3;                   // 归属来源（JSON `source`）："part" | "host" | "family" | "none"
+  repeated ItemAttribution attribution = 4;  // 归属定位（JSON `attribution`）
+}
+
+// 一条归属命中（JSON：`itemIndex[k].attribution[i]`）
+message ItemAttribution {
+  string source = 1;                   // "part" | "host" | "family"（族特有归属仅保留扩展接口）
+  int32 frame = 2;                     // 帧下标（单文件文档 = 0；World 帧 = frames[i].index）
+  repeated int32 grid = 3;             // 格下标 [zSlice, row, column]（与 cellGrid/cellPartsGrid 同下标）
+  string local_id = 4;                 // 仅 source="part"：格内部件定位（= BlockPart.local_id）
+}
+
+// 宿主级物品身份（JSON：`blockPalette[j].hostItem`，层②）
+// 由 Item.getItemFromBlock(block) + damage 导出；无物品形态的方块该字段缺席（不猜）。
+message HostItemIdentity {
+  string registry = 1;                 // 物品注册名（JSON `registry`）
+  int32 damage = 2;                    // 物品 damage（JSON `damage`；= 方块 meta）
+}
