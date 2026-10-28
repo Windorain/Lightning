@@ -1,0 +1,235 @@
+{
+  "schema": "lightning.case/1",
+  "id": "ae2-parts",
+  "label": "控制面契约 1.2 锚点：AE2 缆块 + 部件（中心缆/切换总线/存储总线）——双轨判据 + K1 距离门对照（原版箱子 64 格 TESR 门，gate-near 门内箱在 / far 门外箱失）",
+  "world": {
+    "folder": "cp_ae2_parts",
+    "seed": 20261006,
+    "void": true,
+    "base": [64, 12, 64],
+    "settleTicks": 60
+  },
+  "build": [
+    { "op": "clear", "from": [62, 10, 62], "to": [70, 16, 94] },
+
+    { "op": "block", "at": [64, 12, 64], "id": "appliedenergistics2:tile.BlockCableBus", "meta": 0 },
+    {
+      "op": "te",
+      "at": [64, 12, 64],
+      "completer": "ae2-part",
+      "params": {
+        "parts": [
+          { "item": "appliedenergistics2:item.ItemMultiPart", "meta": 16, "side": "UNKNOWN" },
+          { "item": "appliedenergistics2:item.ItemMultiPart", "meta": 80, "side": "NORTH" },
+          { "item": "appliedenergistics2:item.ItemMultiPart", "meta": 220, "side": "UP" }
+        ]
+      }
+    },
+
+    { "op": "block", "at": [65, 12, 64], "id": "appliedenergistics2:tile.BlockCableBus", "meta": 0 },
+    {
+      "op": "te",
+      "at": [65, 12, 64],
+      "completer": "ae2-part",
+      "params": {
+        "parts": [
+          { "item": "appliedenergistics2:item.ItemMultiPart", "meta": 16, "side": "UNKNOWN" }
+        ]
+      }
+    },
+
+    { "op": "block", "at": [66, 12, 64], "id": "minecraft:chest", "meta": 3 },
+    { "op": "te", "at": [66, 12, 64], "completer": "vanilla", "params": {} },
+
+    { "op": "block", "at": [64, 12, 90], "id": "minecraft:chest", "meta": 3 },
+    { "op": "te", "at": [64, 12, 90], "completer": "vanilla", "params": {} },
+
+    { "op": "wait", "ticks": 20 }
+  ],
+  "capture": {
+    "lighting": "natural",
+    "renderMode": "本色",
+    "worldTime": 6000
+  },
+  "cameras": [
+    {
+      "name": "near",
+      "pos": [68.5, 13.3, 68.5],
+      "yaw": 136.4,
+      "pitch": 8.0,
+      "projection": { "type": "perspective", "fov": 10 },
+      "resolution": [1280, 720]
+    },
+    {
+      "name": "ortho-top",
+      "pos": [65.3, 18.0, 64.2],
+      "yaw": 180.0,
+      "pitch": 90.0,
+      "projection": { "type": "ortho", "orthoHeight": 7.0 },
+      "resolution": [1280, 720]
+    },
+    {
+      "name": "gate-near",
+      "pos": [64.5, 13.5, 120.5],
+      "yaw": 180.0,
+      "pitch": 2.0,
+      "projection": { "type": "perspective", "fov": 8.0 },
+      "resolution": [640, 360]
+    },
+    {
+      "name": "far",
+      "pos": [64.5, 13.5, 160.5],
+      "yaw": 180.0,
+      "pitch": 1.0,
+      "projection": { "type": "perspective", "fov": 5.0 },
+      "resolution": [640, 360]
+    }
+  ],
+  "criteria": [
+    {
+      "id": "te-host-cable",
+      "type": "te-state-equals",
+      "params": { "at": [64, 12, 64], "key": "/partClasses/UNKNOWN" },
+      "expect": "appeng.parts.networking.PartCableGlass"
+    },
+    {
+      "id": "te-host-cable-item",
+      "type": "te-state-equals",
+      "params": { "at": [64, 12, 64], "key": "/parts/UNKNOWN" },
+      "expect": "appliedenergistics2:item.ItemMultiPart@16"
+    },
+    {
+      "id": "te-host-toggle",
+      "type": "te-state-equals",
+      "params": { "at": [64, 12, 64], "key": "/partClasses/NORTH" },
+      "expect": "appeng.parts.misc.PartToggleBus"
+    },
+    {
+      "id": "te-host-storage",
+      "type": "te-state-equals",
+      "params": { "at": [64, 12, 64], "key": "/partClasses/UP" },
+      "expect": "appeng.parts.misc.PartStorageBus"
+    },
+    {
+      "id": "te-host-empty-down",
+      "type": "te-state-equals",
+      "params": { "at": [64, 12, 64], "key": "/parts/DOWN" },
+      "expect": null
+    },
+    {
+      "id": "te-nb-cable",
+      "type": "te-state-equals",
+      "params": { "at": [65, 12, 64], "key": "/partClasses/UNKNOWN" },
+      "expect": "appeng.parts.networking.PartCableGlass"
+    },
+    {
+      "id": "te-nb-cable-item",
+      "type": "te-state-equals",
+      "params": { "at": [65, 12, 64], "key": "/parts/UNKNOWN" },
+      "expect": "appliedenergistics2:item.ItemMultiPart@16"
+    },
+    {
+      "id": "te-nb-empty-east",
+      "type": "te-state-equals",
+      "params": { "at": [65, 12, 64], "key": "/parts/EAST" },
+      "expect": null
+    },
+
+    {
+      "id": "img-host-size-near",
+      "type": "image-size-equals",
+      "params": { "path": "shots/near.png", "width": 1280, "height": 720 }
+    },
+    {
+      "id": "img-host-not-uniform-near",
+      "type": "image-not-uniform",
+      "params": { "path": "shots/near.png", "maxSameColorRatio": 0.9 }
+    },
+    {
+      "id": "img-host-size-ortho",
+      "type": "image-size-equals",
+      "params": { "path": "shots/ortho-top.png", "width": 1280, "height": 720 }
+    },
+    {
+      "id": "img-host-not-uniform-ortho",
+      "type": "image-not-uniform",
+      "params": { "path": "shots/ortho-top.png", "maxSameColorRatio": 0.995 }
+    },
+    {
+      "id": "img-nb-size-near",
+      "type": "image-size-equals",
+      "params": { "path": "shots/near.png", "width": 1280, "height": 720 }
+    },
+    {
+      "id": "img-nb-not-uniform-near",
+      "type": "image-not-uniform",
+      "params": { "path": "shots/near.png", "maxSameColorRatio": 0.9 }
+    },
+    {
+      "id": "img-scene-size-near",
+      "type": "image-size-equals",
+      "params": { "path": "shots/near.png", "width": 1280, "height": 720 }
+    },
+    {
+      "id": "img-scene-not-uniform-near",
+      "type": "image-not-uniform",
+      "params": { "path": "shots/near.png", "maxSameColorRatio": 0.9 }
+    },
+
+    {
+      "id": "img-gate-size-near",
+      "type": "image-size-equals",
+      "params": { "path": "shots/gate-near.png", "width": 640, "height": 360 }
+    },
+    {
+      "id": "img-gate-not-uniform-near",
+      "type": "image-not-uniform",
+      "params": { "path": "shots/gate-near.png", "maxSameColorRatio": 0.98 }
+    },
+    {
+      "id": "img-gate-size-far",
+      "type": "image-size-equals",
+      "params": { "path": "shots/far.png", "width": 640, "height": 360 }
+    },
+    {
+      "id": "img-gate-uniform-far",
+      "type": "image-uniform",
+      "params": { "path": "shots/far.png", "minSameColorRatio": 0.95 }
+    },
+
+    {
+      "id": "world-hash",
+      "type": "world-hash-equals",
+      "params": {}
+    },
+    {
+      "id": "observation-exists",
+      "type": "artifact-exists",
+      "params": { "path": "observation.json" }
+    }
+  ],
+  "variants": [
+    {
+      "id": "neg-host-cable-class-flipped",
+      "mutate": [
+        {
+          "op": "replace",
+          "path": "/criteria/0/expect",
+          "value": "appeng.parts.networking.PartCableSmart"
+        }
+      ],
+      "expectCriteriaRed": ["te-host-cable"]
+    }
+  ],
+  "evidence": {
+    "expect": [
+      { "path": "observation.json", "role": "observation" },
+      { "path": "criteria.json", "role": "criteria" },
+      { "path": "world/scene-manifest.json", "role": "scene-manifest" },
+      { "path": "shots/near.png", "role": "shot" },
+      { "path": "shots/ortho-top.png", "role": "shot" },
+      { "path": "shots/gate-near.png", "role": "shot" },
+      { "path": "shots/far.png", "role": "shot" }
+    ]
+  }
+}

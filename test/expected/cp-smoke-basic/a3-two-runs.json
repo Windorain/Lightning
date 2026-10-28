@@ -1,0 +1,29 @@
+{
+  "schema": "lightning.cp-a3-evidence/1",
+  "caseId": "cp-smoke-basic",
+  "caseSha256": "7a65133883afc3e486cfae11ebc8a6d1fa36a874ec34ffaddca38ddf6f904123",
+  "assertion": "A3：同一固定程序执行两次，产物结构一致（按 docs/control-plane/case-file.md §10 的成文口径）",
+  "conclusion": "green",
+  "a": {
+    "overall": "green",
+    "criteriaOverall": "green",
+    "evidenceOverall": "green",
+    "criteriaCounts": { "green": 4, "red": 0, "error": 0 },
+    "artifactCount": 14
+  },
+  "b": {
+    "overall": "green",
+    "criteriaOverall": "green",
+    "evidenceOverall": "green",
+    "criteriaCounts": { "green": 4, "red": 0, "error": 0 },
+    "artifactCount": 14
+  },
+  "comparison": {
+    "tool": "test/expected/compare-runs.mjs",
+    "exitCode": 0,
+    "same": 14,
+    "different": 0,
+    "overall": "green"
+  },
+  "note": "本用例是冒烟探针（判据 4 条，无 cameras/read/action 段），A3 覆盖「世界重建 + build 段 + 段记账」这一最基础的链路；判据较少，不建 manifest 基准。"
+}

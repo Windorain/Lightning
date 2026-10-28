@@ -1,0 +1,79 @@
+{
+  "schema": "lightning.cp-criteria-set/1",
+  "id": "permissions",
+  "kind": "permissions",
+  "title": "权限门：confirm 门、捕获会话门控、按内容升格",
+  "requiresCase": "smoke-shots",
+  "requiresCaseNote": "选 smoke-shots 是因为它同时含 cameras 段（按内容升格的触发条件）与 build 段（会话门控的触发条件）",
+  "inputContract": {
+    "reads": [
+      "错误信封 {ok:false,error:{code,message,context}}（contract.md §3/§6）",
+      "三个权限级各一份 token（tokens.json）"
+    ],
+    "produces": "机读断言表 + 每次拒绝的完整错误信封",
+    "order": "逐条独立：每条都是一次**预期失败**的调用（不得因为前一条失败而跳过）"
+  },
+  "assertions": [
+    {
+      "id": "perm-confirm-required",
+      "target": "POST /cp/v1/actions/world.rebuild（scene 级，不带 confirm）",
+      "expr": "HTTP 400 且 error.code == CP-CONFIRM-001",
+      "expect": "code == \"CP-CONFIRM-001\" && context.requiredField == \"confirm\"",
+      "failSemantics": "判红：可写动作的确认门失效（无 confirm 也能写世界）",
+      "source": "run-smoke.ps1 A9"
+    },
+    {
+      "id": "perm-confirm-must-be-literal-true",
+      "target": "POST /cp/v1/actions/world.rebuild（confirm 为字符串 \"true\"）",
+      "expr": "仍被 CP-CONFIRM-001 拒",
+      "expect": "code == \"CP-CONFIRM-001\"",
+      "failSemantics": "判红：确认门被宽松类型绕过（contract.md §2 第 4 条明写「必须字面布尔 true，字符串不放行」）",
+      "source": "contract.md §6 的 CP-CONFIRM-001 行"
+    },
+    {
+      "id": "perm-observe-token-cannot-write",
+      "target": "POST /cp/v1/actions/world.rebuild（observe token + confirm:true）",
+      "expr": "HTTP 403 且 error.code == CP-AUTH-002",
+      "expect": "code == \"CP-AUTH-002\"",
+      "failSemantics": "判红：低权 token 能写世界（三级严格递增失效）",
+      "source": "contract.md §2 第 3 条"
+    },
+    {
+      "id": "perm-cameras-needs-forensic",
+      "target": "POST /cp/v1/actions/case.run（含 cameras 段的用例，scene token）",
+      "expr": "HTTP 403 且 error.code == CP-AUTH-002，context.required == \"forensic\"",
+      "expect": "code == \"CP-AUTH-002\" && context.required == \"forensic\" && context.cameraCount > 0",
+      "failSemantics": "判红：scene 级调用方顺手拍了一堆截图（按内容升格失效，case-file.md §4）",
+      "source": "run-shots.ps1 B4（会话门控）/ B5（按内容升格 CP-AUTH-002）"
+    },
+    {
+      "id": "perm-capture-session-blocks-foreign-writes",
+      "target": "capture.begin 之后，由**别的**作业调 world.rebuild",
+      "expr": "HTTP 409 且 error.code == CP-STATE-001",
+      "expect": "code == \"CP-STATE-001\" && context.armed == true",
+      "failSemantics": "判红：捕获会话期间世界还能被别的作业改（截图与世界对不上）",
+      "source": "run-shots.ps1 B4；CaptureSession 的作业归属判定"
+    },
+    {
+      "id": "perm-capture-session-lets-owner-through",
+      "target": "case.run 自己的 capture 段之后、它自己的 build 段",
+      "expr": "不被 CP-STATE-001 拒（开场作业可穿透）",
+      "expect": "segments/capture.json 的 armed == true 且 segments/build.json 的 status == \"ok\"",
+      "failSemantics": "判红：会话把自己的 build 段挡掉了（「会话包围 build 之后区间」的口径失效）",
+      "source": "CaseRunAction.stepCapture 的类注释；run-shots.ps1 B4 的反面"
+    },
+    {
+      "id": "perm-duplicate-capture-begin-rejected",
+      "target": "capture.begin 连调两次",
+      "expr": "第二次 HTTP 409 且 error.code == CP-STATE-001",
+      "expect": "code == \"CP-STATE-001\"（不做隐式续期）",
+      "failSemantics": "判红：重复 begin 被静默接受（会话期限被隐式延长）",
+      "source": "CaptureSession.begin 的契约；contract.md §7.3"
+    }
+  ],
+  "falsification": {
+    "kind": "synthetic-fixture",
+    "how": "用一个**持有 scene token 但带 confirm:true** 的调用去打 world.rebuild：perm-observe-token-cannot-write 应保持绿而 perm-confirm-required 的对照场景（去掉 confirm）应变红——两条断言必须各自独立可红",
+    "record": "见 test/criteria/README.md §3"
+  }
+}

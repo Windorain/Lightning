@@ -1,0 +1,20 @@
+{
+  "schema": "lightning.cp-criteria-types/1",
+  "_comment": "判据类型自描述的导出快照（三方对账的一侧：契约文档向自描述端点对齐）。唯一权威是 case.validate 的 criteriaTypes（数据源 CriteriaEngine.typeCatalog()）。本文件必须与它逐条一致；不一致即文档/代码漂移。",
+  "_authority": "case.validate → result.criteriaTypes（CriteriaEngine.typeCatalog()）",
+  "_howToRefresh": "node test/criteria/check-criteria-types.mjs --print > test/criteria/criteria-types.json",
+  "_howToCheck": "node test/criteria/check-criteria-types.mjs --check test/criteria/criteria-types.json",
+  "_contractVersion": "1.6",
+  "_note": "契约版本 1.6 没有新增判据类型：action 段是段的扩充（编排能力），不是判据词汇的扩充。编排步骤的期望值由 case-file.md §3.2 的 expect（逐步断言）承担。因此本快照在契约版本 1.6 下逐字不变——这正是对账要证明的事。",
+  "types": [
+    { "type": "artifact-exists", "since": "1.0", "params": "path" },
+    { "type": "artifact-nonempty", "since": "1.0", "params": "path, minBytes(默认1)" },
+    { "type": "json-field", "since": "1.0", "params": "path, pointer(RFC 6901), expect(必填)" },
+    { "type": "world-hash-equals", "since": "1.0", "params": "—" },
+    { "type": "event-emitted", "since": "1.0", "params": "kind, minCount(默认1)" },
+    { "type": "image-size-equals", "since": "1.1", "params": "path, width, height" },
+    { "type": "image-not-uniform", "since": "1.1", "params": "path, maxSameColorRatio(默认0.98)" },
+    { "type": "te-state-equals", "since": "1.2", "params": "at[x,y,z], key(RFC 6901 指针，对描述器输出), expect(必填)" },
+    { "type": "image-uniform", "since": "1.2", "params": "path, minSameColorRatio(默认0.98)" }
+  ]
+}

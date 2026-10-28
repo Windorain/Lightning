@@ -1,0 +1,54 @@
+{
+  "schema": "lightning.cp-criteria-set/1",
+  "id": "readonly",
+  "kind": "readonly",
+  "title": "只读性：读面调用前后世界清单哈希不变（验收锚 B1）",
+  "requiresCase": "read-surface",
+  "inputContract": {
+    "reads": [
+      "调用 read.* 之前：world-hash 对照口径（read.blocks 全区域 sha256 或场景清单 sha256）",
+      "调用 read.* 之后：同一口径的哈希"
+    ],
+    "produces": "机读断言表 + 两侧哈希与逐格 diff（非空时）",
+    "order": "先取 before 哈希 → 逐条调 read.* → 再取 after 哈希 → 比较"
+  },
+  "assertions": [
+    {
+      "id": "readonly-world-hash-unchanged",
+      "target": "调用前后两次取到的世界清单哈希",
+      "expr": "beforeSha256 == afterSha256",
+      "expect": "两侧哈希逐字相等",
+      "failSemantics": "判红：读面动了世界（「只读」是验收锚，不是约定）",
+      "source": "run-read-surface.ps1 B1.0/B1.x/B1.99（验收锚 B1）"
+    },
+    {
+      "id": "readonly-no-write-call-sites",
+      "target": "client/controlplane/mc/read/ 全部源码",
+      "expr": "不出现 setBlock/setBlockToAir/markBlockForUpdate/initialize/addPart 等写方法的调用点",
+      "expect": "零命中",
+      "failSemantics": "判红：只读不是靠约定，而是靠写接口不可达——出现调用点即纪律破裂",
+      "source": "contract.md §7.2「只读性（验收 B1）」的静态半边"
+    },
+    {
+      "id": "readonly-read-surface-artifacts-present",
+      "target": "<runDir>/read/*.json",
+      "expr": "用例 read 段声明的每一条 path 都在场且非空",
+      "expect": "逐条在场",
+      "failSemantics": "判红：读面产物缺失（判据引用不到读数）",
+      "source": "run-read-surface.ps1 R0-R2"
+    },
+    {
+      "id": "readonly-diff-clean-after-reads",
+      "target": "<runDir>/read/diff.json → /different",
+      "expr": "读面跑完后与服务端实读逐格 diff 为 0",
+      "expect": "different == 0",
+      "failSemantics": "判红：读面把世界读漂了（与 before/after 哈希互为独立证据）",
+      "source": "run-read-surface.ps1 B1.x 的独立复算半边"
+    }
+  ],
+  "falsification": {
+    "kind": "synthetic-fixture",
+    "how": "让被读区域在两次取哈希之间被一次 scene.block.set（L0）改一格 ⇒ readonly-world-hash-unchanged 与 readonly-diff-clean-after-reads 必须同时变红",
+    "record": "见 test/criteria/README.md §3"
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "schema": "lightning.cp-a3-evidence/1",
+  "caseId": "read-surface",
+  "caseSha256": "59040cf5cce019429d26f0d68219cca0c59b06b796e1e54f01394adacf62da28",
+  "assertion": "A3：同一固定程序执行两次，产物结构一致（按 docs/control-plane/case-file.md §10 的成文口径）",
+  "conclusion": "green",
+  "a": {
+    "overall": "green",
+    "criteriaOverall": "green",
+    "evidenceOverall": "green",
+    "criteriaCounts": { "green": 25, "red": 0, "error": 0 },
+    "artifactCount": 20
+  },
+  "b": {
+    "overall": "green",
+    "criteriaOverall": "green",
+    "evidenceOverall": "green",
+    "criteriaCounts": { "green": 25, "red": 0, "error": 0 },
+    "artifactCount": 20
+  },
+  "comparison": {
+    "tool": "test/expected/compare-runs.mjs",
+    "exitCode": 0,
+    "same": 21,
+    "different": 0,
+    "overall": "green"
+  },
+  "note": "read/run.json 是自引用产物（枚举整个 runs/ 目录），按 presence-only 比较；其余产物按 manifest.json 声明的模式比较。"
+}

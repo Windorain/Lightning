@@ -1,0 +1,62 @@
+{
+  "schema": "lightning.cp-criteria-set/1",
+  "id": "variant-precision",
+  "kind": "variant-precision",
+  "title": "负对照精确命中：expectCriteriaRed 全红，且其余判据保持绿",
+  "requiresCase": "lp-pipe-row",
+  "inputContract": {
+    "reads": [
+      "变体 run 的 <runDir>/criteria.json → criteria[{id,verdict}]",
+      "用例文件的 variants[i].expectCriteriaRed[]"
+    ],
+    "produces": "机读断言表 + 逐条 verdict 映射 + 未变红/误伤两份清单",
+    "order": "读变体 run 的 criteria.json → 按 expectCriteriaRed 查红 → 反查其余是否误伤"
+  },
+  "assertions": [
+    {
+      "id": "variant-expected-criteria-all-red",
+      "target": "变体 run 的 criteria.json → criteria[id].verdict（id ∈ expectCriteriaRed）",
+      "expr": "每一条都是 red",
+      "expect": "全部 red",
+      "failSemantics": "判红：负对照没变红——该判据是恒绿的（它从不失败，因此它什么也没证明）",
+      "source": "anchor-checks.ps1::Test-VariantPrecision；run-shots.ps1 B3d"
+    },
+    {
+      "id": "variant-no-collateral-red",
+      "target": "变体 run 的 criteria.json → criteria[id].verdict（id ∉ expectCriteriaRed）",
+      "expr": "每一条都是 green",
+      "expect": "全部 green",
+      "failSemantics": "判红：变体误伤了别的判据——说明那些判据依赖的输入被这次补丁改变了，变体的「精确」不成立",
+      "source": "anchor-checks.ps1::Test-VariantPrecision 的 otherRed 半边"
+    },
+    {
+      "id": "variant-mutation-is-not-a-noop",
+      "target": "case.validate 的 plan.variants[i].applicable",
+      "expr": "补丁确实改变了用例内容（applicable == true）",
+      "expect": "true",
+      "failSemantics": "判红：空转变体（补丁什么都没改，于是「期望变红」永远成立——恒绿假断言）",
+      "source": "CaseValidator.VariantCheck.ENFORCE；case-file.md §6"
+    },
+    {
+      "id": "variant-runs-are-evaluated",
+      "target": "整跑结果 result.variants[i].evaluated",
+      "expr": "每条变体都被求值（true），未求值的必须有 reason",
+      "expect": "evaluated == true，或 evaluated == false && reason 非空",
+      "failSemantics": "判红：变体被静默跳过（结论里既没绿也没红，调用方会误以为它过了）",
+      "source": "case-file.md §8 第 5 条；CaseRunAction.sweepVariants"
+    },
+    {
+      "id": "variant-verification-ok-when-single-variant",
+      "target": "带 variant 参数整跑的结果 result.variantVerification.ok",
+      "expr": "ok == true（expectCriteriaRed 全红且无缺失）",
+      "expect": "true",
+      "failSemantics": "作业 failed：变体未按预期变红（CP-EXEC-001，防恒绿假断言）",
+      "source": "CaseRunAction.verifyVariant；run-smoke.ps1 A8"
+    }
+  ],
+  "falsification": {
+    "kind": "synthetic-fixture",
+    "how": "把 expectCriteriaRed 改成一个**不会被这次补丁影响**的判据 id ⇒ variant-expected-criteria-all-red 必须变红；把补丁改成空转（replace 成原值）⇒ variant-mutation-is-not-a-noop 必须变红",
+    "record": "见 test/criteria/README.md §3"
+  }
+}

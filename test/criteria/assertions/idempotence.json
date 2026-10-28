@@ -1,0 +1,63 @@
+{
+  "schema": "lightning.cp-criteria-set/1",
+  "id": "idempotence",
+  "kind": "idempotence",
+  "title": "幂等：同参两次重建的场景清单哈希相等，且世界清单两轮逐字节一致",
+  "requiresCase": "lp-pipe-row",
+  "inputContract": {
+    "reads": [
+      "runA/<runDir>/world/scene-manifest.json → /sha256 与 /blocks /tileEntities",
+      "runB/<runDir>/world/scene-manifest.json → 同上",
+      "两次 run 的 criteria.json → world-hash-idempotent 的 verdict"
+    ],
+    "produces": "机读断言表 + 两侧哈希 + （不相等时）逐格 diff",
+    "order": "两次独立整跑（各自 world 段起手重建）→ 比哈希 → 比清单字节"
+  },
+  "assertions": [
+    {
+      "id": "idem-scene-hash-equal",
+      "target": "两次 run 的 world/scene-manifest.json → /sha256",
+      "expr": "sha256A == sha256B",
+      "expect": "两侧逐字相等（64 位十六进制）",
+      "failSemantics": "判红：同参两次重建产出不同世界——「同参同世界」这条前提不成立，所有跨轮哈希比较都是无根之木",
+      "source": "anchor-checks.ps1::Test-IdempotentManifest（run-anchor.ps1 C5）"
+    },
+    {
+      "id": "idem-manifest-blocks-byte-equal",
+      "target": "两次 run 的 world/scene-manifest.json 的 blocks/tileEntities 两段",
+      "expr": "两段规范化 JSON 逐字节相等",
+      "expect": "相等",
+      "failSemantics": "判红：哈希相等但清单文本不同（说明归一化掩盖了差异——两轮世界可能并不相同）",
+      "source": "run-anchor.ps1 C5b「两次 run 的 scene-manifest.json 逐字节一致」"
+    },
+    {
+      "id": "idem-world-hash-criterion-green-both",
+      "target": "两次 run 的 criteria.json → world-hash-idempotent 的 verdict",
+      "expr": "两次都是 green",
+      "expect": "green / green",
+      "failSemantics": "判红：运行期幂等判据在任一轮不绿（世界漂移，或判据实现有问题）",
+      "source": "case-file.md §8 第 7 条的 world-hash-equals 口径"
+    },
+    {
+      "id": "idem-manifest-has-no-duplicate-pos",
+      "target": "两次 run 的 world/scene-manifest.json → /blocks[] 与 /tileEntities[]",
+      "expr": "同一 pos 不出现两次",
+      "expect": "pos 集合大小 == 数组长度",
+      "failSemantics": "判红：清单条目语义是「构建历史」而不是「世界最终状态」（同一 pos 重复出现，说明记录的是逐次构建而非最终去重状态）",
+      "source": "SceneManifest.dedupeByPos 的按 pos 去重口径（清单记录世界最终状态）"
+    },
+    {
+      "id": "idem-a3-artifacts-structurally-equal",
+      "target": "两次 run 的全部产物（按 case-file.md §10.3 的逐产物比较模式）",
+      "expr": "test/expected/compare-runs.mjs 退出码为 0",
+      "expect": "0（全一致）",
+      "failSemantics": "判红：A3「同一固定程序执行两次，产物结构一致」不成立（差异项由比对器逐产物指名）",
+      "source": "case-file.md §10；test/expected/compare-runs.mjs"
+    }
+  ],
+  "falsification": {
+    "kind": "synthetic-fixture",
+    "how": "把第二次 run 的 scene-manifest.json 里某一格的 blockId 改掉 ⇒ idem-scene-hash-equal / idem-manifest-blocks-byte-equal / idem-a3-artifacts-structurally-equal 必须同时变红且**指名**该产物",
+    "record": "见 test/criteria/README.md §3；比对器的自检由 `node test/expected/compare-runs.mjs --selftest` 提供（8/8）"
+  }
+}
