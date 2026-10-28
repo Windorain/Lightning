@@ -1,0 +1,125 @@
+{
+  "schema": "lightning.accept.scene/1",
+  "id": "glass-seam",
+  "title": "相邻玻璃：内部必须透出背景，格与格之间不得出现边线；另设孤立玻璃与贴石玻璃",
+  "world": {
+    "region": "cp_accept_glass_seam",
+    "origin": [
+      64,
+      12,
+      64
+    ],
+    "dim": 0,
+    "time": 6000,
+    "weather": "clear"
+  },
+  "blocks": [
+    {
+      "block": "stone",
+      "at": [
+        0,
+        0,
+        0
+      ],
+      "note": "对照组（不透明）"
+    },
+    {
+      "block": "glass",
+      "at": [
+        1,
+        0,
+        0
+      ]
+    },
+    {
+      "block": "glass",
+      "at": [
+        2,
+        0,
+        0
+      ]
+    },
+    {
+      "block": "glass",
+      "at": [
+        3,
+        0,
+        0
+      ]
+    },
+    {
+      "block": "glass",
+      "at": [
+        1,
+        0,
+        2
+      ],
+      "note": "孤立玻璃：内部应为背景"
+    },
+    {
+      "block": "glass",
+      "at": [
+        3,
+        0,
+        2
+      ]
+    },
+    {
+      "block": "stone",
+      "at": [
+        3,
+        0,
+        3
+      ],
+      "note": "玻璃贴石：透出的应是石头"
+    },
+    {
+      "block": "acc-glass",
+      "at": [
+        1,
+        0,
+        3
+      ],
+      "note": "GT 玻璃（CTM）"
+    },
+    {
+      "block": "acc-glass",
+      "at": [
+        2,
+        0,
+        3
+      ]
+    }
+  ],
+  "cameras": {
+    "views": [
+      "front",
+      "back",
+      "left",
+      "right",
+      "top",
+      "bottom"
+    ],
+    "axonometric": [
+      {
+        "name": "iso-ne",
+        "yaw": 225,
+        "pitch": 30
+      },
+      {
+        "name": "iso-nw",
+        "yaw": 315,
+        "pitch": 30
+      }
+    ],
+    "orthoHeight": "auto",
+    "resolution": [
+      1920,
+      1080
+    ]
+  },
+  "export": {
+    "name": "glass-seam",
+    "shape": "world"
+  }
+}

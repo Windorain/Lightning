@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Embed Dual-Instance E2E</title>
+    <style>
+      body { margin: 0; background: #e8dcc8; font-family: system-ui, sans-serif; }
+      .cols { display: flex; gap: 12px; padding: 8px; align-items: flex-start; }
+      .col { width: 600px; max-width: 48vw; }
+      .web-structure-renderer { width: 100%; height: 560px; background: #0f172a; }
+    </style>
+  </head>
+  <body>
+    <!--
+      嵌入**同页双实例**的测试页（测试专用；不参与任何产品构建）。
+
+      为什么需要它：既有 `e2e-embed-mobile.html` 只挂**一个**实例（`src/e2e/embed-mobile-main.ts`），
+      而同页双实例是「多实例时共享 / 隔离矩阵」的判据面。
+      本页与 `embed-dual.ts` 只做**宿主页的事**：给两个挂载点、按宿主参数调用生产 `mount()`。
+      不 import 任何内部模块拼装宿主，不改 `src/` 产品代码。
+    -->
+    <div class="cols">
+      <div class="col"><div id="embed-a" class="web-structure-renderer"></div></div>
+      <div class="col"><div id="embed-b" class="web-structure-renderer"></div></div>
+    </div>
+    <div id="remount-slot" class="cols"></div>
+    <script type="module" src="/e2e/pages/embed-dual.ts"></script>
+  </body>
+</html>

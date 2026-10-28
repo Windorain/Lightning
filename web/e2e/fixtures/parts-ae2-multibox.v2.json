@@ -1,0 +1,179 @@
+{
+  "format_version": "2.0",
+  "id": "parts-ae2-multibox",
+  "meta": {
+    "name": "Parts Fixture: AE2 Cable Bus Multi-Part Cell",
+    "author": "p0.4-contract",
+    "created_at_ms": 0,
+    "description": "手工 fixture：AE2 线缆总线格（中心玻璃线缆 + NORTH 切换总线 + UP 存储总线，盒取自 p02-run-2 实测）+ 相邻满方块石头。覆盖：多部件格、localId 命名空间、视觉/碰撞双盒、typeKey 含 damage。几何含三个部件盒各自盒内的 raycast 目标面（悬停 E2E 可达性，P2.5 擒获后补全）。",
+    "tags": ["parts", "fixture"],
+    "origin": { "x": 0, "y": 0, "z": 0 }
+  },
+  "statsTemplate": { "mode": "auto", "groups": [], "showOthers": true },
+  "frames": [
+    {
+      "index": 0,
+      "structure": {
+        "geometryPhase": "baked",
+        "cellGrid": [
+          [[1, 2]]
+        ],
+        "cellPartsGrid": [
+          [[0, -1]]
+        ],
+        "partLists": [
+          [
+            {
+              "localId": "ae2:UNKNOWN",
+              "typeKey": "appliedenergistics2:item.ItemMultiPart:16",
+              "displayName": "ME Glass Cable - Fluix",
+              "tooltip": ["ME Glass Cable - Fluix"],
+              "boxes": [
+                { "min": [0.375, 0.375, 0.375], "max": [0.625, 0.625, 0.625], "kind": "visual" },
+                { "min": [0.375, 0.625, 0.375], "max": [0.625, 0.75, 0.625], "kind": "visual" },
+                { "min": [0.375, 0.375, 0.3125], "max": [0.625, 0.625, 0.375], "kind": "visual" },
+                { "min": [0.375, 0.375, 0.375], "max": [0.625, 0.625, 0.625], "kind": "collision" },
+                { "min": [0.375, 0.625, 0.375], "max": [0.625, 0.75, 0.625], "kind": "collision" },
+                { "min": [0.375, 0.375, 0.3125], "max": [0.625, 0.625, 0.375], "kind": "collision" }
+              ],
+              "items": [
+                { "registry": "appliedenergistics2:item.ItemMultiPart", "damage": 16, "count": 1 }
+              ],
+              "source": { "family": "ae2", "fallback": false, "boxProvenance": "both", "tier": 1 }
+            },
+            {
+              "localId": "ae2:NORTH",
+              "typeKey": "appliedenergistics2:item.ItemMultiPart:80",
+              "displayName": "ME Toggle Bus",
+              "tooltip": ["ME Toggle Bus"],
+              "boxes": [
+                { "min": [0.375, 0.375, 0.0], "max": [0.625, 0.625, 0.3125], "kind": "visual" },
+                { "min": [0.375, 0.375, 0.0], "max": [0.625, 0.625, 0.3125], "kind": "collision" }
+              ],
+              "items": [
+                { "registry": "appliedenergistics2:item.ItemMultiPart", "damage": 80, "count": 1 }
+              ],
+              "source": { "family": "ae2", "fallback": false, "boxProvenance": "both", "tier": 1 }
+            },
+            {
+              "localId": "ae2:UP",
+              "typeKey": "appliedenergistics2:item.ItemMultiPart:220",
+              "displayName": "ME Storage Bus",
+              "tooltip": ["ME Storage Bus"],
+              "boxes": [
+                { "min": [0.1875, 0.9375, 0.1875], "max": [0.8125, 1.0, 0.8125], "kind": "visual" },
+                { "min": [0.125, 0.875, 0.125], "max": [0.875, 0.9375, 0.875], "kind": "visual" },
+                { "min": [0.3125, 0.75, 0.3125], "max": [0.6875, 0.875, 0.6875], "kind": "visual" },
+                { "min": [0.1875, 0.9375, 0.1875], "max": [0.8125, 1.0, 0.8125], "kind": "collision" },
+                { "min": [0.125, 0.875, 0.125], "max": [0.875, 0.9375, 0.875], "kind": "collision" },
+                { "min": [0.3125, 0.75, 0.3125], "max": [0.6875, 0.875, 0.6875], "kind": "collision" }
+              ],
+              "items": [
+                { "registry": "appliedenergistics2:item.ItemMultiPart", "damage": 220, "count": 1 }
+              ],
+              "source": { "family": "ae2", "fallback": false, "boxProvenance": "both", "tier": 1 }
+            }
+          ]
+        ],
+        "blockPalette": [
+          {
+            "registryId": "air",
+            "meta": 0,
+            "renderMode": "BakedQuads",
+            "geometry": { "encoding": "bakedQuadsJsonV1", "quads": [] },
+            "occludesAdjacentFaces": false,
+            "tooltip": []
+          },
+          {
+            "registryId": "appliedenergistics2:tile.BlockCableBus",
+            "meta": 0,
+            "renderMode": "BakedQuads",
+            "geometry": {
+              "encoding": "bakedQuadsJsonV1",
+              "quads": [
+                {
+                  "materialIndex": 0,
+                  "vertices": [
+                    { "x": 0.375, "y": 0.375, "z": 0.625, "u": 0, "v": 0, "color": 13421772 },
+                    { "x": 0.625, "y": 0.375, "z": 0.625, "u": 1, "v": 0, "color": 13421772 },
+                    { "x": 0.625, "y": 0.625, "z": 0.625, "u": 1, "v": 1, "color": 13421772 },
+                    { "x": 0.375, "y": 0.625, "z": 0.625, "u": 0, "v": 1, "color": 13421772 }
+                  ]
+                },
+                {
+                  "materialIndex": 0,
+                  "vertices": [
+                    { "x": 0.375, "y": 0.625, "z": 0.375, "u": 0, "v": 0, "color": 13421772 },
+                    { "x": 0.625, "y": 0.625, "z": 0.375, "u": 1, "v": 0, "color": 13421772 },
+                    { "x": 0.625, "y": 0.625, "z": 0.625, "u": 1, "v": 1, "color": 13421772 },
+                    { "x": 0.375, "y": 0.625, "z": 0.625, "u": 0, "v": 1, "color": 13421772 }
+                  ]
+                },
+                {
+                  "materialIndex": 0,
+                  "vertices": [
+                    { "x": 0.375, "y": 0.375, "z": 0.3125, "u": 0, "v": 0, "color": 13421772 },
+                    { "x": 0.625, "y": 0.375, "z": 0.3125, "u": 1, "v": 0, "color": 13421772 },
+                    { "x": 0.625, "y": 0.625, "z": 0.3125, "u": 1, "v": 1, "color": 13421772 },
+                    { "x": 0.375, "y": 0.625, "z": 0.3125, "u": 0, "v": 1, "color": 13421772 }
+                  ]
+                },
+                {
+                  "materialIndex": 0,
+                  "vertices": [
+                    { "x": 0.1875, "y": 1.0, "z": 0.1875, "u": 0, "v": 0, "color": 13421772 },
+                    { "x": 0.8125, "y": 1.0, "z": 0.1875, "u": 1, "v": 0, "color": 13421772 },
+                    { "x": 0.8125, "y": 1.0, "z": 0.8125, "u": 1, "v": 1, "color": 13421772 },
+                    { "x": 0.1875, "y": 1.0, "z": 0.8125, "u": 0, "v": 1, "color": 13421772 }
+                  ]
+                }
+              ]
+            },
+            "occludesAdjacentFaces": false,
+            "tooltip": ["ME Glass Cable - Fluix"]
+          },
+          {
+            "registryId": "minecraft:stone",
+            "meta": 0,
+            "renderMode": "BakedQuads",
+            "geometry": {
+              "encoding": "bakedQuadsJsonV1",
+              "quads": [
+                {
+                  "materialIndex": 0,
+                  "vertices": [
+                    { "x": 0, "y": 0, "z": 1, "u": 0, "v": 0, "color": 8947848 },
+                    { "x": 1, "y": 0, "z": 1, "u": 1, "v": 0, "color": 8947848 },
+                    { "x": 1, "y": 1, "z": 1, "u": 1, "v": 1, "color": 8947848 },
+                    { "x": 0, "y": 1, "z": 1, "u": 0, "v": 1, "color": 8947848 }
+                  ]
+                },
+                {
+                  "materialIndex": 0,
+                  "vertices": [
+                    { "x": 0, "y": 1, "z": 0, "u": 0, "v": 0, "color": 8947848 },
+                    { "x": 1, "y": 1, "z": 0, "u": 1, "v": 0, "color": 8947848 },
+                    { "x": 1, "y": 1, "z": 1, "u": 1, "v": 1, "color": 8947848 },
+                    { "x": 0, "y": 1, "z": 1, "u": 0, "v": 1, "color": 8947848 }
+                  ]
+                }
+              ]
+            },
+            "occludesAdjacentFaces": true,
+            "tooltip": ["Stone"]
+          }
+        ]
+      }
+    }
+  ],
+  "annotations": [],
+  "labels": [],
+  "materialPalette": [{ "textureBlobIndex": 0 }],
+  "textureBlobs": [
+    {
+      "id": "e2e-parts",
+      "mime": "image/png",
+      "dataBase64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+    }
+  ]
+}

@@ -1,0 +1,153 @@
+{
+  "schema": "lightning.accept.scene/1",
+  "id": "atypical-tesr",
+  "title": "非典型方块：TESR / 自定义静态模型混合",
+  "notes": "压测 TESR 与自定义渲染器：末影箱、信标、附魔台、铁砧、炼药锅、漏斗，同场景放一个普通箱子作对照。（铁砧需要下方实心方块支撑，故铺一排石头地板。）",
+  "world": {
+    "region": "cp_atypical_tesr",
+    "origin": [
+      64,
+      12,
+      63
+    ],
+    "dim": 0,
+    "time": 6000,
+    "weather": "clear"
+  },
+  "blocks": [
+    {
+      "block": "stone",
+      "at": [
+        0,
+        -1,
+        0
+      ]
+    },
+    {
+      "block": "stone",
+      "at": [
+        1,
+        -1,
+        0
+      ]
+    },
+    {
+      "block": "stone",
+      "at": [
+        2,
+        -1,
+        0
+      ]
+    },
+    {
+      "block": "stone",
+      "at": [
+        3,
+        -1,
+        0
+      ]
+    },
+    {
+      "block": "stone",
+      "at": [
+        4,
+        -1,
+        0
+      ]
+    },
+    {
+      "block": "stone",
+      "at": [
+        5,
+        -1,
+        0
+      ]
+    },
+    {
+      "block": "stone",
+      "at": [
+        6,
+        -1,
+        0
+      ]
+    },
+    {
+      "block": "chest",
+      "at": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "block": "ender-chest",
+      "at": [
+        1,
+        0,
+        0
+      ]
+    },
+    {
+      "block": "beacon",
+      "at": [
+        2,
+        0,
+        0
+      ]
+    },
+    {
+      "block": "enchanting-table",
+      "at": [
+        3,
+        0,
+        0
+      ]
+    },
+    {
+      "block": "anvil",
+      "at": [
+        4,
+        0,
+        0
+      ]
+    },
+    {
+      "block": "cauldron",
+      "at": [
+        5,
+        0,
+        0
+      ]
+    },
+    {
+      "block": "hopper",
+      "at": [
+        6,
+        0,
+        0
+      ]
+    }
+  ],
+  "cameras": {
+    "views": [
+      "front",
+      "top"
+    ],
+    "axonometric": [
+      {
+        "name": "iso-se",
+        "yaw": 135,
+        "pitch": 30
+      }
+    ],
+    "orthoHeight": "auto",
+    "resolution": [
+      1920,
+      1080
+    ]
+  },
+  "export": {
+    "name": "atypical-tesr",
+    "shape": "world"
+  }
+}

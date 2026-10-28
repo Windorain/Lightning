@@ -1,0 +1,90 @@
+{
+  "schema": "lightning.accept.scene/1",
+  "id": "ctm-glass",
+  "title": "CTM 玻璃：相邻 ACC 玻璃无缝且中心透明 + 三种实心外壳混排",
+  "notes": "覆盖 CTM 玻璃材质路径（相邻玻璃无缝 + 中心透明 + 实心外壳混排）。game 侧图必须由同一次运行产生；不接受任何历史截图。",
+  "world": {
+    "region": "cp_accept_ctm_glass",
+    "origin": [
+      64,
+      12,
+      64
+    ],
+    "dim": 0,
+    "time": 6000,
+    "weather": "clear"
+  },
+  "blocks": [
+    {
+      "block": "stone",
+      "at": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "block": "acc-glass",
+      "at": [
+        1,
+        0,
+        0
+      ]
+    },
+    {
+      "block": "acc-glass",
+      "at": [
+        2,
+        0,
+        0
+      ]
+    },
+    {
+      "block": "magnetic-flux",
+      "at": [
+        3,
+        0,
+        0
+      ]
+    },
+    {
+      "block": "gravity-stab",
+      "at": [
+        4,
+        0,
+        0
+      ]
+    }
+  ],
+  "cameras": {
+    "views": [
+      "front",
+      "back",
+      "left",
+      "right",
+      "top",
+      "bottom"
+    ],
+    "axonometric": [
+      {
+        "name": "iso-ne",
+        "yaw": 225,
+        "pitch": 30
+      },
+      {
+        "name": "iso-se",
+        "yaw": 135,
+        "pitch": 30
+      }
+    ],
+    "orthoHeight": "auto",
+    "resolution": [
+      1920,
+      1080
+    ]
+  },
+  "export": {
+    "name": "ctm-glass",
+    "shape": "world"
+  }
+}

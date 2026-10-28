@@ -1,0 +1,217 @@
+{
+  "format_version": "2.0",
+  "id": "parts-singlebox-mix",
+  "meta": {
+    "name": "Parts Fixture: Single-Box + Full-Cube Mix",
+    "author": "p0.4-contract",
+    "created_at_ms": 0,
+    "description": "手工 fixture：下半 slab×2（共享 partLists 下标，验证去重）+ 上半 slab + 石头（满方块对照，无 parts）+ 孤立栅栏（碰撞盒高 1.5 越界）。盒取自 p03-run-3 实测。覆盖：单盒档、满方块混存、越界盒、drop 身份计数键（上/下半 slab 同 typeKey）。",
+    "tags": ["parts", "fixture"],
+    "origin": { "x": 0, "y": 0, "z": 0 }
+  },
+  "statsTemplate": { "mode": "auto", "groups": [], "showOthers": true },
+  "frames": [
+    {
+      "index": 0,
+      "structure": {
+        "geometryPhase": "baked",
+        "cellGrid": [
+          [[1, 1, 2, 3, 4]]
+        ],
+        "cellPartsGrid": [
+          [[0, 0, 1, -1, 2]]
+        ],
+        "partLists": [
+          [
+            {
+              "localId": "generic:0",
+              "typeKey": "minecraft:stone_slab:0",
+              "displayName": "Stone Slab",
+              "tooltip": ["Stone Slab"],
+              "boxes": [
+                { "min": [0.0, 0.0, 0.0], "max": [1.0, 0.5, 1.0], "kind": "visual" },
+                { "min": [0.0, 0.0, 0.0], "max": [1.0, 0.5, 1.0], "kind": "collision" }
+              ],
+              "items": [
+                { "registry": "minecraft:stone_slab", "damage": 0, "count": 1 }
+              ],
+              "source": { "family": "generic", "fallback": true, "boxProvenance": "both", "tier": 2 }
+            }
+          ],
+          [
+            {
+              "localId": "generic:0",
+              "typeKey": "minecraft:stone_slab:0",
+              "displayName": "Stone Slab",
+              "tooltip": ["Stone Slab"],
+              "boxes": [
+                { "min": [0.0, 0.5, 0.0], "max": [1.0, 1.0, 1.0], "kind": "visual" },
+                { "min": [0.0, 0.5, 0.0], "max": [1.0, 1.0, 1.0], "kind": "collision" }
+              ],
+              "items": [
+                { "registry": "minecraft:stone_slab", "damage": 0, "count": 1 }
+              ],
+              "source": { "family": "generic", "fallback": true, "boxProvenance": "both", "tier": 2 }
+            }
+          ],
+          [
+            {
+              "localId": "generic:0",
+              "typeKey": "minecraft:fence:0",
+              "displayName": "Fence",
+              "tooltip": ["Fence"],
+              "boxes": [
+                { "min": [0.375, 0.0, 0.375], "max": [0.625, 1.0, 0.625], "kind": "visual" },
+                { "min": [0.375, 0.0, 0.375], "max": [0.625, 1.5, 0.625], "kind": "collision" }
+              ],
+              "items": [
+                { "registry": "minecraft:fence", "damage": 0, "count": 1 }
+              ],
+              "source": { "family": "generic", "fallback": true, "boxProvenance": "both", "tier": 2 }
+            }
+          ]
+        ],
+        "blockPalette": [
+          {
+            "registryId": "air",
+            "meta": 0,
+            "renderMode": "BakedQuads",
+            "geometry": { "encoding": "bakedQuadsJsonV1", "quads": [] },
+            "occludesAdjacentFaces": false,
+            "tooltip": []
+          },
+          {
+            "registryId": "minecraft:stone_slab",
+            "meta": 0,
+            "renderMode": "BakedQuads",
+            "geometry": {
+              "encoding": "bakedQuadsJsonV1",
+              "quads": [
+                {
+                  "materialIndex": 0,
+                  "vertices": [
+                    { "x": 0, "y": 0.5, "z": 0, "u": 0, "v": 0, "color": 8947848 },
+                    { "x": 1, "y": 0.5, "z": 0, "u": 1, "v": 0, "color": 8947848 },
+                    { "x": 1, "y": 0.5, "z": 1, "u": 1, "v": 1, "color": 8947848 },
+                    { "x": 0, "y": 0.5, "z": 1, "u": 0, "v": 1, "color": 8947848 }
+                  ]
+                },
+                {
+                  "materialIndex": 0,
+                  "vertices": [
+                    { "x": 0, "y": 0, "z": 1, "u": 0, "v": 0, "color": 8947848 },
+                    { "x": 1, "y": 0, "z": 1, "u": 1, "v": 0, "color": 8947848 },
+                    { "x": 1, "y": 0.5, "z": 1, "u": 1, "v": 1, "color": 8947848 },
+                    { "x": 0, "y": 0.5, "z": 1, "u": 0, "v": 1, "color": 8947848 }
+                  ]
+                }
+              ]
+            },
+            "occludesAdjacentFaces": false,
+            "tooltip": ["Stone Slab"]
+          },
+          {
+            "registryId": "minecraft:stone_slab",
+            "meta": 8,
+            "renderMode": "BakedQuads",
+            "geometry": {
+              "encoding": "bakedQuadsJsonV1",
+              "quads": [
+                {
+                  "materialIndex": 0,
+                  "vertices": [
+                    { "x": 0, "y": 1, "z": 0, "u": 0, "v": 0, "color": 8947848 },
+                    { "x": 1, "y": 1, "z": 0, "u": 1, "v": 0, "color": 8947848 },
+                    { "x": 1, "y": 1, "z": 1, "u": 1, "v": 1, "color": 8947848 },
+                    { "x": 0, "y": 1, "z": 1, "u": 0, "v": 1, "color": 8947848 }
+                  ]
+                },
+                {
+                  "materialIndex": 0,
+                  "vertices": [
+                    { "x": 0, "y": 0.5, "z": 1, "u": 0, "v": 0, "color": 8947848 },
+                    { "x": 1, "y": 0.5, "z": 1, "u": 1, "v": 0, "color": 8947848 },
+                    { "x": 1, "y": 1, "z": 1, "u": 1, "v": 1, "color": 8947848 },
+                    { "x": 0, "y": 1, "z": 1, "u": 0, "v": 1, "color": 8947848 }
+                  ]
+                }
+              ]
+            },
+            "occludesAdjacentFaces": false,
+            "tooltip": ["Stone Slab"]
+          },
+          {
+            "registryId": "minecraft:stone",
+            "meta": 0,
+            "renderMode": "BakedQuads",
+            "geometry": {
+              "encoding": "bakedQuadsJsonV1",
+              "quads": [
+                {
+                  "materialIndex": 0,
+                  "vertices": [
+                    { "x": 0, "y": 0, "z": 1, "u": 0, "v": 0, "color": 8947848 },
+                    { "x": 1, "y": 0, "z": 1, "u": 1, "v": 0, "color": 8947848 },
+                    { "x": 1, "y": 1, "z": 1, "u": 1, "v": 1, "color": 8947848 },
+                    { "x": 0, "y": 1, "z": 1, "u": 0, "v": 1, "color": 8947848 }
+                  ]
+                },
+                {
+                  "materialIndex": 0,
+                  "vertices": [
+                    { "x": 0, "y": 1, "z": 0, "u": 0, "v": 0, "color": 8947848 },
+                    { "x": 1, "y": 1, "z": 0, "u": 1, "v": 0, "color": 8947848 },
+                    { "x": 1, "y": 1, "z": 1, "u": 1, "v": 1, "color": 8947848 },
+                    { "x": 0, "y": 1, "z": 1, "u": 0, "v": 1, "color": 8947848 }
+                  ]
+                }
+              ]
+            },
+            "occludesAdjacentFaces": true,
+            "tooltip": ["Stone"]
+          },
+          {
+            "registryId": "minecraft:fence",
+            "meta": 0,
+            "renderMode": "BakedQuads",
+            "geometry": {
+              "encoding": "bakedQuadsJsonV1",
+              "quads": [
+                {
+                  "materialIndex": 0,
+                  "vertices": [
+                    { "x": 0.375, "y": 0, "z": 0.625, "u": 0, "v": 0, "color": 7022617 },
+                    { "x": 0.625, "y": 0, "z": 0.625, "u": 1, "v": 0, "color": 7022617 },
+                    { "x": 0.625, "y": 1, "z": 0.625, "u": 1, "v": 1, "color": 7022617 },
+                    { "x": 0.375, "y": 1, "z": 0.625, "u": 0, "v": 1, "color": 7022617 }
+                  ]
+                },
+                {
+                  "materialIndex": 0,
+                  "vertices": [
+                    { "x": 0.375, "y": 1, "z": 0.375, "u": 0, "v": 0, "color": 7022617 },
+                    { "x": 0.625, "y": 1, "z": 0.375, "u": 1, "v": 0, "color": 7022617 },
+                    { "x": 0.625, "y": 1, "z": 0.625, "u": 1, "v": 1, "color": 7022617 },
+                    { "x": 0.375, "y": 1, "z": 0.625, "u": 0, "v": 1, "color": 7022617 }
+                  ]
+                }
+              ]
+            },
+            "occludesAdjacentFaces": false,
+            "tooltip": ["Fence"]
+          }
+        ]
+      }
+    }
+  ],
+  "annotations": [],
+  "labels": [],
+  "materialPalette": [{ "textureBlobIndex": 0 }],
+  "textureBlobs": [
+    {
+      "id": "e2e-parts",
+      "mime": "image/png",
+      "dataBase64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+    }
+  ]
+}
