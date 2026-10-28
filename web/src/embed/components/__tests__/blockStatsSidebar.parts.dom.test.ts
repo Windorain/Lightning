@@ -1,0 +1,931 @@
+// @vitest-environment jsdom
+/**
+ * B-3 统计栏 DOM 行为（jsdom + 真实组件，无替身）：**左栏纯物品展示**。
+ *
+ * 契约：`docs/contracts/format-parts-contract.md`
+ *   （§9 物品索引表、旧统计字段）。
+ *
+ * 覆盖：
+ *  - **移除锁**：无视图切换 UI（无 `部件物品/宿主/自定义` 标签、无工具条、无配置来源徽标、
+ *    无 provenance 面板、无分组标题）；
+ *  - 物品行：行 = 物品身份键、名称 = 游戏内显示名、数量 = 物品件数、固定数量降序；
+ *  - `items: []` 无物品部件提示行保留；
+ *  - **兼容兜底**：残留本机配置（`lightning:stats:v1:*`，含损坏/schema 不符/不可用视图）与残留
+ *    文档配置（`statsTemplate` / `statsOverride`）⇒ 静默忽略：不空栏、不报错、不读写本机键；
+ *  - **图标通道不变**：`partIconTextures` prop → `setPartIconTextureSource` →
+ *    `ensurePartIcons(物品身份键)`；部件模式**不**走宿主 `ensure`（无宿主行）；
+ *  - **事件通道**：物品行照发 `tooltip-hover`（payload = 物品身份键）；**点选走 B-5 的
+ *    `select-item`**（payload = 行键 + 当前可见顺序 + 修饰键，语义由 `pure/itemSelection.ts`
+ *    定义），旧文件宿主行的 `select-block` 通道不受影响；
+ *  - **B-4 两条 DOM 断言**：① 物品行 emit `tooltip-hover`；② 该 hover 经生产解析层
+ *    （`useEmbedTooltip`）解析出的文案非空、含物品显示名，且来自文档根级 `itemIndex`
+ *    （不是 `"0"`、不是宿主方块名）。解析层的逐键/兜底/两类键不混用细节见
+ *    `web/src/embed/__tests__/embedTooltipParts.test.ts`；
+ *  - **B-5 选中态**：`--selected` / `data-stats-selected` 由**集合** `selectedItemKeys` 决定，
+ *    旧路径单值 `selectedBlockId` 不泄漏到物品行；无对应方块的行带行内标记
+ *    （`data-stats-unresolved` + 色点）；锚点行带 `data-stats-anchor`；选择提示行
+ *    （`[data-stats-selection-notice]`）按 `selectionNotice` prop 呈现。
+ *
+ * 无框架依赖：`createApp(...).mount(el)` + 原生 DOM 断言（仓库未装 @vue/test-utils）。
+ * BlockIconCache 以真实实例构造（jsdom 无 WebGL ⇒ 烘焙确定性失败落占位，行 DOM 不依赖图标产出）；
+ * 对它的 `vi.spyOn` 只做**调用观测**（对象仍是生产实例，无替身）。
+ */
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createApp, nextTick, ref, shallowRef, type App } from 'vue'
+import BlockStatsSidebar from '@/embed/components/BlockStatsSidebar.vue'
+import { useEmbedTooltip } from '@/shared/viewport/useEmbedTooltip'
+import { BlockIconCache } from '@/render/interaction/blockIconCache'
+import { buildBlockStatsEntries } from '@/render/interaction/blockStats'
+import { blockRegistryKeyForPalette } from '@/render/data/blockRegistryResolve'
+import { buildItemHitIndexFromIndex, type ItemIndex } from '@/pure/itemIndex'
+import type { MaterialLibraryApi } from '@/render/materials/simpleMaterialLibrary'
+import type { StructureDefinition } from '@/render/schema/types'
+import type { EmbedHover } from '@/runtime/hover'
+import type { PartRecord } from '@/pure/partTypes'
+
+import singleboxFixture from '../../../../e2e/fixtures/parts-singlebox-mix.v2.json'
+import ae2Fixture from '../../../../e2e/fixtures/parts-ae2-multibox.v2.json'
+
+// jsdom 无 ResizeObserver（组件挂载路径用到）：环境垫片，非业务替身
+if (typeof globalThis.ResizeObserver === 'undefined') {
+  globalThis.ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  } as unknown as typeof ResizeObserver
+}
+
+/** 图标缓存的材质库在烘焙失败路径上不可达（jsdom 无 WebGL）；仅满足构造签名 */
+const stubLibrary = { tick() {}, isDisposed: () => false } as unknown as MaterialLibraryApi
+
+/**
+ * 模拟运行时形态：`RuntimeDocument.serialize()` 把文档根字段（partIconTextures / statsTemplate /
+ * statsOverride / id…）与首帧 structure 展开到同一对象，`toStructureDefinition` 浅拷贝挂载 ——
+ * 侧栏即从此对象读全部输入。
+ */
+function runtimeDefOf(fixture: unknown): StructureDefinition {
+  const root = fixture as Record<string, unknown>
+  const frames = root.frames as Array<{ structure: unknown }>
+  const { frames: _f, annotations: _a, labels: _l, ...rest } = root
+  return { ...rest, ...(frames[0]!.structure as Record<string, unknown>) } as unknown as StructureDefinition
+}
+
+/** tooltipMap：与生产一致（palette 键 → tooltip 行）；部件模式的物品行不使用它（仅旧路径用） */
+function tooltipMapOf(def: StructureDefinition): Map<string, string[]> {
+  const map = new Map<string, string[]>()
+  for (const e of def.blockPalette) {
+    if (e.tooltip && e.tooltip.length > 0) {
+      map.set(blockRegistryKeyForPalette(e.registryId, e.meta), e.tooltip)
+    }
+  }
+  return map
+}
+
+const apps: App[] = []
+const hosts: HTMLElement[] = []
+
+interface Mounted {
+  el: HTMLElement
+  app: App
+  cache: BlockIconCache
+}
+
+function mountSidebar(def: StructureDefinition, extraProps: Record<string, unknown> = {}): Mounted {
+  const el = document.createElement('div')
+  document.body.appendChild(el)
+  const cache = new BlockIconCache(stubLibrary, undefined, def)
+  const app = createApp(BlockStatsSidebar as never, {
+    entries: buildBlockStatsEntries(def, 'all'),
+    cache,
+    tooltipMap: tooltipMapOf(def),
+    // definition 不传：走 cache.getStructure() 回退 —— 即生产 EmbedViewport 现状接线
+    ...extraProps,
+  } as Record<string, unknown>)
+  app.mount(el)
+  apps.push(app)
+  hosts.push(el)
+  return { el, app, cache }
+}
+
+function rowKeys(el: HTMLElement): string[] {
+  return [...el.querySelectorAll<HTMLElement>('[data-stats-row-key]')].map(
+    (r) => r.getAttribute('data-stats-row-key')!,
+  )
+}
+
+function rowByKey(el: HTMLElement, key: string): HTMLElement {
+  // 键只含 registry/damage 字符（字母数字 : . _ - @ #），属性选择器内无需转义
+  return el.querySelector<HTMLElement>(`[data-stats-row-key="${key}"]`)!
+}
+
+function qtys(el: HTMLElement): string[] {
+  return [...el.querySelectorAll<HTMLElement>('[data-stats-row-key] .nei-slot-qty')].map(
+    (q) => q.textContent!,
+  )
+}
+
+const STATS_LOCAL_PREFIX = 'lightning:stats:v1:'
+
+function statsLocalKeys(): string[] {
+  const out: string[] = []
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i)!
+    if (k.startsWith(STATS_LOCAL_PREFIX)) out.push(k)
+  }
+  return out.sort()
+}
+
+/** 视图切换 UI / 配置入口的"必须不存在"清单（决策 C 移除锁的 DOM 面） */
+function expectNoViewSwitchUi(el: HTMLElement): void {
+  expect(el.querySelector('.nei-stats-toolbar')).toBeNull()
+  expect(el.querySelector('[data-stats-view-btn]')).toBeNull()
+  expect(el.querySelector('[role="tablist"]')).toBeNull()
+  expect(el.querySelector('[role="tab"]')).toBeNull()
+  expect(el.querySelector('.nei-stats-views')).toBeNull()
+  expect(el.querySelector('[data-stats-source]')).toBeNull()
+  expect(el.querySelector('.nei-stats-prov-pill')).toBeNull()
+  expect(el.querySelector('[data-stats-provenance]')).toBeNull()
+  expect(el.querySelector('.nei-stats-prov')).toBeNull()
+  expect(el.querySelector('[data-stats-prov-field]')).toBeNull()
+  expect(el.querySelector('[data-stats-reset-local]')).toBeNull()
+  expect(el.querySelector('[data-stats-group-title]')).toBeNull()
+  // 行不再有 kind（只存在物品行一种）
+  expect(el.querySelector('[data-stats-row-kind]')).toBeNull()
+}
+
+beforeEach(() => {
+  localStorage.clear()
+})
+
+afterEach(() => {
+  for (const app of apps.splice(0)) app.unmount()
+  for (const el of hosts.splice(0)) el.remove()
+  localStorage.clear()
+})
+
+// ---------------------------------------------------------------------------
+// 决策 C 移除锁（DOM 面）
+// ---------------------------------------------------------------------------
+
+describe('B-3 移除锁：无视图切换 UI、无配置入口', () => {
+  it('部件文件：工具栏/视图按钮/来源徽标/provenance 面板/分组标题全部不存在', () => {
+    const { el } = mountSidebar(runtimeDefOf(singleboxFixture))
+    expectNoViewSwitchUi(el)
+    expect(el.querySelectorAll('.nei-slot-row')).toHaveLength(2) // 有行 ⇒ 不是"没渲染所以查不到"
+  })
+
+  it('残留 statsOverride(view=custom + groups) ⇒ 不出现自定义视图按钮、不出现分组标题', () => {
+    const def = {
+      ...runtimeDefOf(singleboxFixture),
+      statsOverride: {
+        view: 'custom',
+        rules: { groups: [{ title: '板材', match: ['minecraft:stone_slab:*'] }], showHostRows: true },
+      },
+    } as unknown as StructureDefinition
+    const { el } = mountSidebar(def, { definition: def })
+    expectNoViewSwitchUi(el)
+    expect(rowKeys(el)).toEqual(['minecraft:stone_slab:0', 'minecraft:fence:0'])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 物品行（形态 + 数量口径 + 固定排序）
+// ---------------------------------------------------------------------------
+
+describe('B-3 物品行：行集/名称/数量/图标键', () => {
+  it('单盒混存 fixture：slab 合并计 3、fence 计 1；行名 = 游戏内显示名；图标键 = 物品身份键', () => {
+    const { el } = mountSidebar(runtimeDefOf(singleboxFixture))
+
+    // 行集：物品身份键，数量降序（3 → 1）；满方块宿主 minecraft:stone 不进清单
+    expect(rowKeys(el)).toEqual(['minecraft:stone_slab:0', 'minecraft:fence:0'])
+    expect(qtys(el)).toEqual(['3', '1'])
+
+    const slab = rowByKey(el, 'minecraft:stone_slab:0')
+    expect(slab.getAttribute('data-stats-icon-key')).toBe('minecraft:stone_slab:0') // 物品身份键（硬约束）
+    expect(slab.querySelector('.nei-slot-name')!.textContent).toBe('Stone Slab') // 游戏内显示名（硬约束）
+    expect(slab.querySelector('.nei-slot-id')!.textContent).toBe('stone_slab:0')
+    expect(slab.querySelector('.nei-slot-qty')!.textContent).toBe('3') // 下半×2 + 上半×1 合并
+
+    const fence = rowByKey(el, 'minecraft:fence:0')
+    expect(fence.querySelector('.nei-slot-name')!.textContent).toBe('Fence')
+    expect(fence.querySelector('.nei-slot-qty')!.textContent).toBe('1')
+    expect(el.querySelector('.nei-sidebar-head .nei-sidebar-count')!.textContent).toBe('2')
+  })
+
+  it('AE2 多部件格 fixture：三种物品身份各计 1，并列按行键字典序；行名 = 游戏内显示名', () => {
+    const { el } = mountSidebar(runtimeDefOf(ae2Fixture))
+    expect(rowKeys(el)).toEqual([
+      'appliedenergistics2:item.ItemMultiPart:16',
+      'appliedenergistics2:item.ItemMultiPart:220',
+      'appliedenergistics2:item.ItemMultiPart:80',
+    ])
+    expect(qtys(el)).toEqual(['1', '1', '1'])
+    const names = [...el.querySelectorAll<HTMLElement>('[data-stats-row-key] .nei-slot-name')].map(
+      (n) => n.textContent,
+    )
+    expect(names).toEqual(['ME Glass Cable - Fluix', 'ME Storage Bus', 'ME Toggle Bus'])
+  })
+
+  it('折叠形态：行带 --collapsed、title = 物品显示名、无名称/数量列，脚注计数照旧', () => {
+    const { el } = mountSidebar(runtimeDefOf(singleboxFixture), { collapsed: true })
+    expectNoViewSwitchUi(el)
+    const rows = [...el.querySelectorAll<HTMLElement>('.nei-slot-row')]
+    expect(rows).toHaveLength(2)
+    expect(rows[0]!.classList.contains('nei-slot-row--collapsed')).toBe(true)
+    expect(rows[0]!.getAttribute('title')).toBe('Stone Slab')
+    expect(rows[0]!.querySelector('.nei-slot-info')).toBeNull()
+    expect(el.querySelector('.nei-sidebar-foot .nei-sidebar-count')!.textContent).toBe('2')
+  })
+
+  it('数量口径 = 物品件数：非整数原样呈现（至多两位）、整数不带小数', () => {
+    const box = { min: [0, 0, 0] as [number, number, number], max: [1, 1, 1] as [number, number, number], kind: 'visual' as const }
+    const source = { family: 'fmp' as const, fallback: false, boxProvenance: 'both' as const, tier: 1 }
+    const half = (n: number): PartRecord => ({
+      localId: 'fmp:0', typeKey: 'fmp:microblock:1#mat=stone', displayName: 'Stone Microblock',
+      tooltip: [], boxes: [box], source,
+      items: [{ registry: 'fmp:microblock', damage: 1, nbtDiscriminator: 'mat=stone', count: n }],
+    })
+    const def = {
+      geometryPhase: 'baked', id: 'fractional',
+      blockPalette: [
+        { registryId: 'air', meta: 0, renderMode: 'BakedQuads', geometry: { encoding: 'bakedQuadsJsonV1', quads: [] }, occludesAdjacentFaces: false, tooltip: [] },
+        { registryId: 'fmp:microblock', meta: 1, renderMode: 'BakedQuads', geometry: { encoding: 'bakedQuadsJsonV1', quads: [] }, occludesAdjacentFaces: false, tooltip: [] },
+      ],
+      materialPalette: [],
+      cellGrid: [[[1]]],
+      cellPartsGrid: [[[0]]],
+      partLists: [[half(0.25), half(0.25)]],
+    } as unknown as StructureDefinition
+
+    const { el } = mountSidebar(def, { definition: def })
+    expect(rowKeys(el)).toEqual(['fmp:microblock:1#mat=stone'])
+    expect(qtys(el)).toEqual(['0.5'])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// items: [] 未计入提示
+// ---------------------------------------------------------------------------
+
+describe('B-3 无物品部件提示', () => {
+  it('items: [] 部件不进物品行，以提示行呈现计数（提示保留）', () => {
+    const box = { min: [0.375, 0, 0.375] as [number, number, number], max: [0.625, 1, 0.625] as [number, number, number], kind: 'visual' as const }
+    const source = { family: 'generic' as const, fallback: true, boxProvenance: 'both' as const, tier: 2 }
+    const itemless: PartRecord = {
+      localId: 'generic:0', typeKey: 'minecraft:torch:0', displayName: 'Torch',
+      tooltip: [], boxes: [box], items: [], source,
+    }
+    const normal: PartRecord = {
+      localId: 'generic:0', typeKey: 'minecraft:fence:0', displayName: 'Fence',
+      tooltip: [], boxes: [box], items: [{ registry: 'minecraft:fence', damage: 0, count: 1 }], source,
+    }
+    const paletteEntry = (registryId: string) => ({
+      registryId, meta: 0, renderMode: 'BakedQuads' as const,
+      geometry: { encoding: 'bakedQuadsJsonV1' as const, quads: [] },
+      occludesAdjacentFaces: false, tooltip: [],
+    })
+    const def = {
+      geometryPhase: 'baked', id: 'itemless-test',
+      blockPalette: [paletteEntry('air'), paletteEntry('minecraft:stone')],
+      materialPalette: [],
+      cellGrid: [[[1, 1]]],
+      cellPartsGrid: [[[0, 1]]],
+      partLists: [[itemless], [normal]],
+    } as unknown as StructureDefinition
+
+    const { el } = mountSidebar(def, { definition: def })
+    expect(rowKeys(el)).toEqual(['minecraft:fence:0']) // 无物品部件不产生物品行
+    expect(el.querySelector('[data-stats-itemless]')!.textContent).toContain('1 个无物品部件')
+    expectNoViewSwitchUi(el)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 兼容兜底：残留/不可用配置不空栏、不报错、不被读写
+// ---------------------------------------------------------------------------
+
+describe('B-3 兼容兜底：残留配置静默忽略', () => {
+  it('残留本机配置（不可用视图 view=hosts / 损坏 JSON / schema 不符）⇒ 物品行不变、不空栏、localStorage 一字未改', () => {
+    const good = `${STATS_LOCAL_PREFIX}parts-singlebox-mix`
+    const residual = JSON.stringify({ schema: 1, config: { view: 'hosts', rules: { showHostRows: true } } })
+    localStorage.setItem(good, residual)
+    localStorage.setItem(`${STATS_LOCAL_PREFIX}e2e-minimal`, '{oops')
+    localStorage.setItem(`${STATS_LOCAL_PREFIX}other-doc`, JSON.stringify({ schema: 999, config: { view: 'custom' } }))
+
+    let el: HTMLElement | null = null
+    expect(() => { el = mountSidebar(runtimeDefOf(singleboxFixture)).el }).not.toThrow()
+
+    expect(rowKeys(el!)).toEqual(['minecraft:stone_slab:0', 'minecraft:fence:0']) // 不因残留配置切换/清空
+    expect(el!.querySelector('.nei-sidebar-empty')).toBeNull() // 不空栏
+    expectNoViewSwitchUi(el!)
+    // 不再读写：三个残留键原样留存、无新增
+    expect(localStorage.getItem(good)).toBe(residual)
+    expect(statsLocalKeys()).toEqual([
+      `${STATS_LOCAL_PREFIX}e2e-minimal`, `${STATS_LOCAL_PREFIX}other-doc`, good,
+    ])
+  })
+
+  it('残留文档配置（statsTemplate mode=custom + statsOverride view=hosts/showHostRows）⇒ 物品行不变、无宿主行', async () => {
+    const def = {
+      ...runtimeDefOf(singleboxFixture),
+      statsTemplate: {
+        mode: 'custom',
+        showOthers: true,
+        groups: [{ label: '板材', entries: [{ partTypeKey: 'minecraft:stone_slab:0' }] }],
+      },
+      statsOverride: { view: 'hosts', rules: { showHostRows: true, hostGroupTitle: '方块' } },
+    } as unknown as StructureDefinition
+    const { el } = mountSidebar(def, { definition: def })
+    await nextTick()
+
+    expectNoViewSwitchUi(el)
+    expect(rowKeys(el)).toEqual(['minecraft:stone_slab:0', 'minecraft:fence:0']) // 仍是物品清单
+    expect(rowKeys(el)).not.toContain('minecraft:stone') // showHostRows 不产生宿主行
+    expect(rowKeys(el)).not.toContain('minecraft:stone_slab') // 也不出现宿主口径的 slab 键
+    expect([...el.querySelectorAll('.nei-slot-row')]).toHaveLength(2)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 图标通道（partIconTextures 两级回退）不变
+// ---------------------------------------------------------------------------
+
+describe('B-3 图标通道不变', () => {
+  it('partIconTextures prop ⇒ setPartIconTextureSource(解析器)；行图标键全部走 ensurePartIcons，且不走宿主 ensure', async () => {
+    const textures = { 'minecraft:stone_slab:0': 'iVBORw0KGgoAAAANSUhEUg==' }
+    const def = runtimeDefOf(singleboxFixture)
+    const cache = new BlockIconCache(stubLibrary, undefined, def)
+    const setSource = vi.spyOn(cache, 'setPartIconTextureSource')
+    const ensurePartIcons = vi.spyOn(cache, 'ensurePartIcons')
+    const ensureHosts = vi.spyOn(cache, 'ensure')
+
+    const el = document.createElement('div')
+    document.body.appendChild(el)
+    const app = createApp(BlockStatsSidebar as never, {
+      entries: buildBlockStatsEntries(def, 'all'),
+      cache,
+      partIconTextures: textures,
+    } as Record<string, unknown>)
+    app.mount(el)
+    apps.push(app)
+    hosts.push(el)
+    await nextTick()
+
+    // 通道 1：纹理源以物品身份键解析器注入（prop → 缓存）
+    expect(setSource).toHaveBeenCalled()
+    const resolver = setSource.mock.calls.at(-1)![0] as (k: string) => string | null
+    expect(typeof resolver).toBe('function')
+    expect(resolver('minecraft:stone_slab:0')).toBe(textures['minecraft:stone_slab:0'])
+    expect(resolver('minecraft:fence:0')).toBeNull() // 未覆盖键 ⇒ null（回退链接管）
+
+    // 通道 2 的入口：全部物品身份键登记（两级回退在 BlockIconCache 内，本组件不复制回退逻辑）
+    expect(ensurePartIcons).toHaveBeenCalledWith(['minecraft:stone_slab:0', 'minecraft:fence:0'])
+    expect(ensureHosts).not.toHaveBeenCalled() // 无宿主行 ⇒ 不触发宿主图标通道
+  })
+
+  it('卸载时撤下纹理源（setPartIconTextureSource(null)）', () => {
+    const def = runtimeDefOf(singleboxFixture)
+    const cache = new BlockIconCache(stubLibrary, undefined, def)
+    const setSource = vi.spyOn(cache, 'setPartIconTextureSource')
+    const { app } = mountSidebar(def, { partIconTextures: { 'minecraft:fence:0': 'x' }, cache })
+    setSource.mockClear()
+    app.unmount()
+    expect(setSource).toHaveBeenCalledWith(null)
+    apps.pop() // 已手动卸载：避免 afterEach 重复卸载
+  })
+})
+
+// ---------------------------------------------------------------------------
+// B-5：物品行点选（事件通道 + 集合选中态 + 无对应标记 + 清空）
+// ---------------------------------------------------------------------------
+
+/** 硬编码反查索引：slab 有对应（part 命中）、fence 显式"没有对应方块" */
+const B5_ITEM_INDEX: ItemIndex = {
+  'minecraft:stone_slab:0': {
+    display: 'Stone Slab', tooltip: ['Stone Slab'], source: 'part',
+    attribution: [{ source: 'part', frame: 0, grid: [0, 0, 0], localId: 'generic:0' }],
+  },
+  'minecraft:fence:0': {
+    display: 'Fence', tooltip: ['Fence'], source: 'none', attribution: [],
+  },
+}
+const B5_INDEX = buildItemHitIndexFromIndex(B5_ITEM_INDEX)
+/** 可见顺序（= 数量降序：slab 3 → fence 1） */
+const B5_ORDER = ['minecraft:stone_slab:0', 'minecraft:fence:0']
+
+function mountSinglebox(extra: Record<string, unknown> = {}): HTMLElement {
+  return mountSidebar(runtimeDefOf(singleboxFixture), extra).el
+}
+
+/** 物品行的 tooltip 触发区 = 图标包裹元素（行文本区不发 tooltip-hover）。 */
+function iconOf(row: HTMLElement): HTMLElement {
+  const icon = row.querySelector<HTMLElement>('[data-stats-icon-hover]')
+  expect(icon, '物品行必须有图标触发元素 [data-stats-icon-hover]').not.toBeNull()
+  return icon!
+}
+
+describe('B-5 物品行点选：事件通道（payload = 事实，语义在上层）', () => {
+  it('悬停仍发 tooltip-hover（物品身份键）；点选改发 select-item（行键 + 可见顺序 + 修饰键）', () => {
+    const onHover = vi.fn()
+    const onSelectItem = vi.fn()
+    const onSelectBlock = vi.fn()
+    const el = mountSinglebox({
+      onTooltipHover: onHover,
+      onSelectItem,
+      onSelectBlock,
+      itemIndex: B5_INDEX,
+    })
+
+    const slab = rowByKey(el, 'minecraft:stone_slab:0')
+    iconOf(slab).dispatchEvent(new MouseEvent('pointerenter', { bubbles: true, clientX: 3, clientY: 4 }))
+    expect(onHover).toHaveBeenLastCalledWith({
+      blockId: 'minecraft:stone_slab:0', clientX: 3, clientY: 4, source: 'sidebar',
+    })
+    iconOf(slab).dispatchEvent(new MouseEvent('pointerleave', { bubbles: true }))
+    expect(onHover).toHaveBeenLastCalledWith(null)
+
+    // 单击：无修饰键
+    slab.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(onSelectItem).toHaveBeenLastCalledWith({
+      key: 'minecraft:stone_slab:0', order: B5_ORDER, ctrl: false, shift: false,
+    })
+    // 物品行**不再**走旧路径的 select-block 通道
+    expect(onSelectBlock).not.toHaveBeenCalled()
+  })
+
+  it('Ctrl / Meta / Shift 如实上报（Cmd 归并为 ctrl）', () => {
+    const onSelectItem = vi.fn()
+    const el = mountSinglebox({ onSelectItem, itemIndex: B5_INDEX })
+    const fence = rowByKey(el, 'minecraft:fence:0')
+
+    fence.dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true }))
+    expect(onSelectItem).toHaveBeenLastCalledWith({
+      key: 'minecraft:fence:0', order: B5_ORDER, ctrl: true, shift: false,
+    })
+    fence.dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true }))
+    expect(onSelectItem).toHaveBeenLastCalledWith({
+      key: 'minecraft:fence:0', order: B5_ORDER, ctrl: false, shift: true,
+    })
+    fence.dispatchEvent(new MouseEvent('click', { bubbles: true, metaKey: true, shiftKey: true }))
+    expect(onSelectItem).toHaveBeenLastCalledWith({
+      key: 'minecraft:fence:0', order: B5_ORDER, ctrl: true, shift: true,
+    })
+  })
+})
+
+describe('B-5 物品行选中态：集合语义（selectedItemKeys，而非旧单值 selectedBlockId）', () => {
+  it('selectedItemKeys 决定 --selected / data-stats-selected（多行同时选中）', () => {
+    const el = mountSinglebox({
+      itemIndex: B5_INDEX,
+      selectedItemKeys: new Set(['minecraft:stone_slab:0', 'minecraft:fence:0']),
+    })
+    const slab = rowByKey(el, 'minecraft:stone_slab:0')
+    const fence = rowByKey(el, 'minecraft:fence:0')
+    expect(slab.classList.contains('nei-slot-row--selected')).toBe(true)
+    expect(fence.classList.contains('nei-slot-row--selected')).toBe(true)
+    expect(slab.getAttribute('data-stats-selected')).toBe('true')
+    expect(fence.getAttribute('data-stats-selected')).toBe('true')
+  })
+
+  it('只有子集被选中时，未选中行不带选中态', () => {
+    const el = mountSinglebox({
+      itemIndex: B5_INDEX,
+      selectedItemKeys: new Set(['minecraft:fence:0']),
+    })
+    expect(rowByKey(el, 'minecraft:fence:0').getAttribute('data-stats-selected')).toBe('true')
+    expect(rowByKey(el, 'minecraft:stone_slab:0').getAttribute('data-stats-selected')).toBe('false')
+    expect(el.querySelectorAll('.nei-slot-row--selected')).toHaveLength(1)
+  })
+
+  it('旧路径单值 selectedBlockId **不**泄漏到物品行（两条路径数据位互不串台）', () => {
+    const el = mountSinglebox({
+      itemIndex: B5_INDEX,
+      selectedBlockId: 'minecraft:stone_slab:0',
+    })
+    expect(el.querySelector('.nei-slot-row--selected')).toBeNull()
+    expect(rowByKey(el, 'minecraft:stone_slab:0').getAttribute('data-stats-selected')).toBe('false')
+  })
+
+  it('锚点行带 data-stats-anchor 与 --anchor（Shift 区间的可视落点）', () => {
+    const el = mountSinglebox({
+      itemIndex: B5_INDEX,
+      selectedItemKeys: new Set(['minecraft:stone_slab:0']),
+      selectionAnchor: 'minecraft:stone_slab:0',
+    })
+    const slab = rowByKey(el, 'minecraft:stone_slab:0')
+    expect(slab.getAttribute('data-stats-anchor')).toBe('true')
+    expect(slab.classList.contains('nei-slot-row--anchor')).toBe(true)
+    expect(rowByKey(el, 'minecraft:fence:0').getAttribute('data-stats-anchor')).toBe('false')
+  })
+})
+
+describe('B-5 无对应方块：行内可辨认标记（混选时逐项可辨认）', () => {
+  it('无对应的行带 data-stats-unresolved + 行内色点（title 语义"没有对应方块"）', () => {
+    const el = mountSinglebox({ itemIndex: B5_INDEX })
+    const fence = rowByKey(el, 'minecraft:fence:0')
+    const slab = rowByKey(el, 'minecraft:stone_slab:0')
+
+    expect(fence.getAttribute('data-stats-unresolved')).toBe('true')
+    expect(fence.classList.contains('nei-slot-row--unresolved')).toBe(true)
+    const dot = fence.querySelector<HTMLElement>('[data-stats-unresolved-dot]')
+    expect(dot, '无对应项必须有行内标记').not.toBeNull()
+    expect(dot!.getAttribute('title')).toBe('没有对应方块')
+
+    expect(slab.getAttribute('data-stats-unresolved')).toBe('false')
+    expect(slab.querySelector('[data-stats-unresolved-dot]')).toBeNull()
+  })
+
+  it('索引缺省（旧部件文件无 itemIndex）⇒ 全部行按"没有对应方块"标记（不得让用户误判为渲染故障）', () => {
+    const el = mountSinglebox()
+    expect(rowKeys(el)).toEqual(B5_ORDER)
+    for (const key of B5_ORDER) {
+      expect(rowByKey(el, key).getAttribute('data-stats-unresolved')).toBe('true')
+    }
+  })
+
+  it('混选（一个有色点、一个没有）⇒ 逐项可辨认，且提示行说明"没有对应方块"', () => {
+    const el = mountSinglebox({
+      itemIndex: B5_INDEX,
+      selectedItemKeys: new Set(B5_ORDER),
+      selectionNotice: '1 项没有对应方块（已选中，不高亮）',
+    })
+    expect(rowByKey(el, 'minecraft:fence:0').getAttribute('data-stats-unresolved')).toBe('true')
+    expect(rowByKey(el, 'minecraft:stone_slab:0').getAttribute('data-stats-unresolved')).toBe('false')
+    const notice = el.querySelector<HTMLElement>('[data-stats-selection-notice]')!
+    expect(notice.textContent).toContain('没有对应方块')
+  })
+
+  it('选择提示行按 selectionNotice prop 呈现；缺省 ⇒ 不渲染（DOM 零新增）', () => {
+    const withNotice = mountSinglebox({ itemIndex: B5_INDEX, selectionNotice: '命中 812 处，仅高亮前 500 处' })
+    expect(withNotice.querySelector('[data-stats-selection-notice]')!.textContent)
+      .toBe('命中 812 处，仅高亮前 500 处')
+    const without = mountSinglebox({ itemIndex: B5_INDEX })
+    expect(without.querySelector('[data-stats-selection-notice]')).toBeNull()
+  })
+})
+
+describe('B-5 清空选择：Esc 与点左栏空白', () => {
+  it('点左栏空白 ⇒ clear-selection；点行本身 ⇒ 不发 clear-selection', () => {
+    const onClear = vi.fn()
+    const el = mountSinglebox({ itemIndex: B5_INDEX, onClearSelection: onClear })
+
+    rowByKey(el, 'minecraft:stone_slab:0').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(onClear, '点行不算空白').not.toHaveBeenCalled()
+
+    el.querySelector('.nei-sidebar-grid')!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(onClear).toHaveBeenCalledTimes(1)
+  })
+
+  it('Esc ⇒ clear-selection（document 级监听）', () => {
+    const onClear = vi.fn()
+    mountSinglebox({ itemIndex: B5_INDEX, onClearSelection: onClear })
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    expect(onClear).toHaveBeenCalledTimes(1)
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true }))
+    expect(onClear, '其它键不触发').toHaveBeenCalledTimes(1)
+  })
+
+  it('拖拽手势（pointerdown → 位移后的 click）不算"点空白"，不清空选择', () => {
+    const onClear = vi.fn()
+    const el = mountSinglebox({ itemIndex: B5_INDEX, onClearSelection: onClear })
+    const grid = el.querySelector('.nei-sidebar-grid')!
+
+    grid.dispatchEvent(pointerAt('pointerdown', { x: 10, y: 100, buttons: 1 }))
+    grid.dispatchEvent(pointerAt('pointermove', { x: 10, y: 200, buttons: 1 }))
+    grid.dispatchEvent(pointerAt('pointerup', { x: 10, y: 200, buttons: 0 }))
+    grid.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 10, clientY: 200 }))
+    expect(onClear, '位移 > 4px ⇒ 视为拖拽（滚动/下拉回弹的收尾 click）').not.toHaveBeenCalled()
+
+    // 对照：同一位置按下 + 无位移的原地 click 仍是"点空白"
+    grid.dispatchEvent(pointerAt('pointerdown', { x: 10, y: 200, buttons: 1 }))
+    grid.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 10, clientY: 200 }))
+    expect(onClear).toHaveBeenCalledTimes(1)
+  })
+
+  it('卸载后不再监听 Esc（不留悬挂监听）', () => {
+    const onClear = vi.fn()
+    const { el, app } = mountSidebar(runtimeDefOf(singleboxFixture), {
+      itemIndex: B5_INDEX, onClearSelection: onClear,
+    })
+    expect(el.querySelectorAll('.nei-slot-row')).toHaveLength(2)
+    app.unmount()
+    apps.pop() // 已手动卸载：避免 afterEach 重复卸载
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    expect(onClear).not.toHaveBeenCalled()
+  })
+
+  it('无 itemIndex 且非宿主调色板键 ⇒ 回退行键本身（不再是 "0" 这类尾段片段）', () => {
+    const onHover = vi.fn()
+    const { el } = mountSidebar(runtimeDefOf(singleboxFixture), { onTooltipHover: onHover })
+    iconOf(rowByKey(el, 'minecraft:fence:0'))
+      .dispatchEvent(new MouseEvent('pointerenter', { bubbles: true, clientX: 1, clientY: 1 }))
+    const payload = onHover.mock.lastCall![0] as { blockId: string }
+    // 解析层（useEmbedTooltip）在两条键通道都不中时返回行键本身
+    expect(tooltipTextFor(runtimeDefOf(singleboxFixture), payload.blockId)).toBe(payload.blockId)
+    expect(tooltipTextFor(runtimeDefOf(singleboxFixture), payload.blockId)).not.toBe('0')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// B-4 DOM 断言：物品行 emit `tooltip-hover` + 该 hover 解析出的文案
+// ---------------------------------------------------------------------------
+
+/**
+ * 物品索引表条目（契约 §9 落盘形态；mod 侧 `ItemIndexIntegrator` 逐字段对齐）。
+ * 说明行**故意与部件级 `PartRecord.tooltip` / 宿主 NEI 文案都不同** ⇒ 解析出它即证明
+ * 文案确实来自 `itemIndex`（而不是恰好相同的旁路）。
+ */
+const ITEM_INDEX_FOR_FENCE = {
+  'minecraft:fence:0': {
+    display: 'Fence',
+    tooltip: ['Fence', 'DOCK-B4-说明行（物品索引表）'],
+    source: 'part',
+    attribution: [{ source: 'part', frame: 0, grid: [0, 0, 4], localId: 'generic:0' }],
+  },
+}
+
+/**
+ * 把侧栏 itemIndex 条目喂给**生产解析层** `useEmbedTooltip`（与 EmbedViewport 同一接线：
+ * `definitionRef` = 渲染定义根）——DOM 只负责发事件，文案解析走真实 composable。
+ */
+function tooltipTextFor(def: StructureDefinition, blockId: string): string {
+  const hoverRef = ref<EmbedHover | null>({
+    kind: 'block', source: 'sidebar', blockId, clientX: 0, clientY: 0,
+  })
+  const api = useEmbedTooltip({
+    hoverRef,
+    definitionRef: shallowRef(def),
+    tooltipPaletteRef: ref<readonly string[]>([]),
+    showHoverTooltipRef: ref(true),
+    // R1-β① C5：`useEmbedTooltip` 改吃内核读面投影；本条只验侧栏行键解析，
+    // 故两项如实给"没有元数据 / 没有注解"（不是伪装成有值）。
+    metaRef: ref(null),
+    annotationsRef: ref([]),
+  })
+  return api.tooltipText.value
+}
+
+describe('B-4 物品行 DOM 断言（硬要求两条 + 触发区收窄到图标的负向条）', () => {
+  it('断言①：悬停**图标** emit `tooltip-hover`，payload = 物品身份键 + 指针坐标', () => {
+    const onHover = vi.fn()
+    const { el } = mountSidebar(runtimeDefOf(singleboxFixture), { onTooltipHover: onHover })
+
+    const fence = rowByKey(el, 'minecraft:fence:0')
+    expect(fence.getAttribute('data-stats-icon-key')).toBe('minecraft:fence:0')
+    const icon = iconOf(fence)
+    icon.dispatchEvent(new MouseEvent('pointerenter', { bubbles: true, clientX: 11, clientY: 22 }))
+    expect(onHover).toHaveBeenLastCalledWith({
+      blockId: 'minecraft:fence:0', clientX: 11, clientY: 22, source: 'sidebar',
+    })
+
+    // 同路径的 pointermove 亦发（B-3 已删 `kind === 'host'` 短路 ⇒ 无短路残留）
+    icon.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 33, clientY: 44 }))
+    expect(onHover).toHaveBeenLastCalledWith({
+      blockId: 'minecraft:fence:0', clientX: 33, clientY: 44, source: 'sidebar',
+    })
+  })
+
+  it('断言③（负向）：悬停行**文本区/数量区**不发 tooltip-hover（触发区 = 图标）', () => {
+    const onHover = vi.fn()
+    const { el } = mountSidebar(runtimeDefOf(singleboxFixture), { onTooltipHover: onHover })
+
+    const fence = rowByKey(el, 'minecraft:fence:0')
+    // 行文本区（名称/键）悬停：事件冒泡到行 div，但行 div 上没有 tooltip 绑定 ⇒ 零调用
+    fence.querySelector<HTMLElement>('.nei-slot-info')!
+      .dispatchEvent(new MouseEvent('pointerenter', { bubbles: true, clientX: 60, clientY: 8 }))
+    fence.querySelector<HTMLElement>('.nei-slot-name')!
+      .dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 60, clientY: 8 }))
+    fence.querySelector<HTMLElement>('.nei-slot-qty')!
+      .dispatchEvent(new MouseEvent('pointerenter', { bubbles: true, clientX: 150, clientY: 8 }))
+    // 整行 div 本身也不发（绑定已移到图标）
+    fence.dispatchEvent(new MouseEvent('pointerenter', { bubbles: true, clientX: 10, clientY: 8 }))
+    expect(onHover, '行文本区/数量区/行容器悬停都不发 tooltip-hover').not.toHaveBeenCalled()
+  })
+
+  it('断言②：该 hover 解析出的文案非空且含物品显示名，且不是 "0"、不是宿主方块名', () => {
+    const onHover = vi.fn()
+    // 文档根级 itemIndex 手工构造（单元层允许直接构造根字段；与导出侧落盘同形）
+    const def = {
+      ...runtimeDefOf(singleboxFixture),
+      itemIndex: ITEM_INDEX_FOR_FENCE,
+    } as unknown as StructureDefinition
+    const { el } = mountSidebar(def, { definition: def, onTooltipHover: onHover })
+
+    const fence = rowByKey(el, 'minecraft:fence:0')
+    iconOf(fence).dispatchEvent(new MouseEvent('pointerenter', { bubbles: true, clientX: 11, clientY: 22 }))
+
+    // 事件 payload 与解析层之间不插桩：拿 DOM 真实发出的行键去喂生产解析层
+    const payload = onHover.mock.lastCall![0] as { blockId: string }
+    expect(payload.blockId).toBe('minecraft:fence:0')
+
+    const text = tooltipTextFor(def, payload.blockId)
+    expect(text.length, '文案非空').toBeGreaterThan(0)
+    expect(text, '含物品显示名').toContain('Fence')
+    expect(text, '文案来自物品索引表（不是部件 tooltip / 宿主 NEI）').toContain('DOCK-B4-说明行')
+    expect(text, '不是 "0"（缺口② 的键错配产物）').not.toBe('0')
+    expect(text, '不是宿主方块名').not.toContain('Stone')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 下拉手势与点击共享边界（always-on DOM 回归）
+//
+// 真实浏览器里，若 pointerdown 就 setPointerCapture(grid)，pointerup/click 会被
+// 重定向到 grid，行的 @click 不触发（真实鼠标点选静默失效）。这里锁定三个不变量：
+//  ① 阈值前不建立捕获；
+//  ② 越过共享边界才捕获，且既有下拉视觉/默认行为仍生效；
+//  ③ 阈值前外部 release 留下的 stale pointer 不得让后续 hover 捕获/preventDefault/pull。
+// ---------------------------------------------------------------------------
+
+/** 真实 PointerEvent 形态（jsdom 支持 PointerEvent；pointerType 不伪造成浏览器支持差异）。 */
+function pointerAt(
+  type: 'pointerdown' | 'pointermove' | 'pointerup',
+  opts: { x: number; y: number; buttons: number; pointerType?: string; pointerId?: number },
+): PointerEvent {
+  return new PointerEvent(type, {
+    bubbles: true,
+    cancelable: true,
+    composed: true,
+    pointerId: opts.pointerId ?? 7,
+    pointerType: opts.pointerType ?? 'mouse',
+    isPrimary: true,
+    button: 0,
+    buttons: opts.buttons,
+    clientX: opts.x,
+    clientY: opts.y,
+  })
+}
+
+/** 在 grid 实例上装捕获观测（jsdom 无原生 pointer capture；这是观测垫片，不是业务替身）。 */
+function captureProbe(grid: HTMLElement): { set: ReturnType<typeof vi.fn>; release: ReturnType<typeof vi.fn> } {
+  const set = vi.fn()
+  const release = vi.fn()
+  Object.defineProperty(grid, 'setPointerCapture', { value: set, configurable: true, writable: true })
+  Object.defineProperty(grid, 'releasePointerCapture', { value: release, configurable: true, writable: true })
+  return { set, release }
+}
+
+describe('下拉手势与点击共享边界（pointer capture 不吞行点击）', () => {
+  it.each(['mouse', 'touch', 'pen'])(
+    '%s：pointerdown/阈值前不 capture；越过共享边界才 capture 且下拉生效',
+    async (pointerType) => {
+      const el = mountSinglebox({ itemIndex: B5_INDEX })
+      const grid = el.querySelector<HTMLElement>('.nei-sidebar-grid')!
+      const { set } = captureProbe(grid)
+
+      grid.dispatchEvent(pointerAt('pointerdown', { x: 10, y: 100, buttons: 1, pointerType }))
+      expect(set, 'pointerdown 本身不 capture（否则行 click 会被重定向）').not.toHaveBeenCalled()
+
+      const below = pointerAt('pointermove', { x: 10, y: 103, buttons: 1, pointerType })
+      grid.dispatchEvent(below)
+      expect(set, '3px < 共享阈值 ⇒ 不 capture').not.toHaveBeenCalled()
+      expect(below.defaultPrevented, '阈值前不 preventDefault').toBe(false)
+
+      const exactly = pointerAt('pointermove', { x: 10, y: 104, buttons: 1, pointerType })
+      grid.dispatchEvent(exactly)
+      expect(set, '恰好 4px 仍按点击边界处理（strictly greater）').not.toHaveBeenCalled()
+      expect(exactly.defaultPrevented).toBe(false)
+
+      const over = pointerAt('pointermove', { x: 10, y: 105, buttons: 1, pointerType })
+      grid.dispatchEvent(over)
+      expect(set, '越过共享边界 ⇒ capture 一次').toHaveBeenCalledTimes(1)
+      expect(set).toHaveBeenCalledWith(7)
+      expect(over.defaultPrevented, '既有下拉仍 preventDefault').toBe(true)
+      await nextTick()
+      const inner = grid.firstElementChild as HTMLElement
+      expect(inner.style.transform, '既有下拉位移仍在（不是把 pull 功能关掉）').toContain('translateY')
+    },
+  )
+
+  it.each(['mouse', 'touch', 'pen'])(
+    '%s：阈值前离开 grid 后外部 release ⇒ 后续 buttons=0 hover 不 capture/preventDefault/pull，stale 被清',
+    async (pointerType) => {
+      const el = mountSinglebox({ itemIndex: B5_INDEX })
+      const grid = el.querySelector<HTMLElement>('.nei-sidebar-grid')!
+      const { set } = captureProbe(grid)
+
+      grid.dispatchEvent(pointerAt('pointerdown', { x: 10, y: 100, buttons: 1, pointerType }))
+      grid.dispatchEvent(pointerAt('pointermove', { x: 10, y: 103, buttons: 1, pointerType }))
+      expect(set).not.toHaveBeenCalled()
+
+      // 阈值前指针已离开 grid：pointerup 不落在 grid 上（未 capture），pullPointerId 残留。
+      document.body.dispatchEvent(pointerAt('pointerup', { x: 10, y: 103, buttons: 0, pointerType }))
+
+      const staleHover = pointerAt('pointermove', { x: 10, y: 140, buttons: 0, pointerType })
+      grid.dispatchEvent(staleHover)
+      expect(set, 'stale hover 不得因残留 pullPointerId 建立 capture').not.toHaveBeenCalled()
+      expect(staleHover.defaultPrevented, 'stale hover 不得 preventDefault').toBe(false)
+      await nextTick()
+      const inner = grid.firstElementChild as HTMLElement
+      expect(inner.style.transform, 'stale hover 不得产生 pull 位移').not.toContain('translateY')
+
+      // 再按下的 hover/move 也不应沿用旧 pullPointerId（已 reset 为 -1）
+      const after = pointerAt('pointermove', { x: 10, y: 150, buttons: 1, pointerType })
+      grid.dispatchEvent(after)
+      expect(set, 'reset 后旧 pointerId 不再被当作活动拖拽').not.toHaveBeenCalled()
+      expect(after.defaultPrevented).toBe(false)
+    },
+  )
+
+  it('普通物品行 pointerdown+click 仍发 select-item，且不触发 clear-selection', () => {
+    const onSelectItem = vi.fn()
+    const onClear = vi.fn()
+    const el = mountSinglebox({ itemIndex: B5_INDEX, onSelectItem, onClearSelection: onClear })
+    const row = rowByKey(el, 'minecraft:stone_slab:0')
+
+    row.dispatchEvent(pointerAt('pointerdown', { x: 10, y: 10, buttons: 1 }))
+    row.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 10, clientY: 10 }))
+
+    expect(onSelectItem, '行 click 仍进入选择通道').toHaveBeenCalled()
+    expect(onSelectItem.mock.lastCall![0]).toMatchObject({ key: 'minecraft:stone_slab:0' })
+    expect(onClear, '点行不得被当成点空白清空选择').not.toHaveBeenCalled()
+  })
+
+  it.each(['mouse', 'touch', 'pen'])(
+    '%s：阈值前 grid 外 window up 立即清 stale；不 hover 直接外部 down+move 不 capture/pull',
+    async (pointerType) => {
+      const el = mountSinglebox({ itemIndex: B5_INDEX })
+      const grid = el.querySelector<HTMLElement>('.nei-sidebar-grid')!
+      const { set } = captureProbe(grid)
+
+      grid.dispatchEvent(pointerAt('pointerdown', { x: 10, y: 100, buttons: 1, pointerType }))
+      grid.dispatchEvent(pointerAt('pointermove', { x: 10, y: 103, buttons: 1, pointerType }))
+      expect(set).not.toHaveBeenCalled()
+
+      // 未先 hover：窗口捕获阶段收到 grid 外的 release，必须立即 reset/移除监听。
+      document.body.dispatchEvent(pointerAt('pointerup', { x: 10, y: 103, buttons: 0, pointerType }))
+
+      // 不经过 buttons=0 hover，直接“grid 外按下 + buttons=1 拖入”：旧 pointerId 不得幽灵 pull。
+      document.body.dispatchEvent(pointerAt('pointerdown', { x: 500, y: 500, buttons: 1, pointerType }))
+      const dragIn = pointerAt('pointermove', { x: 10, y: 150, buttons: 1, pointerType })
+      grid.dispatchEvent(dragIn)
+      expect(set, 'grid 外 release 后旧 pointerId 不再建立 capture').not.toHaveBeenCalled()
+      expect(dragIn.defaultPrevented, 'grid 外 release 后拖入不得 preventDefault').toBe(false)
+      await nextTick()
+      const inner = grid.firstElementChild as HTMLElement
+      expect(inner.style.transform, 'grid 外 release 后拖入不得产生 pull 位移').not.toContain('translateY')
+    },
+  )
+
+  it('无活动状态的 buttons=0 hover 不清 snap 动画/拖拽状态', () => {
+    const el = mountSinglebox({ itemIndex: B5_INDEX })
+    const grid = el.querySelector<HTMLElement>('.nei-sidebar-grid')!
+    const inner = grid.firstElementChild as HTMLElement
+    inner.classList.add('nei-sidebar-grid-inner--snap')
+
+    grid.dispatchEvent(pointerAt('pointermove', { x: 10, y: 150, buttons: 0 }))
+    expect(inner.classList.contains('nei-sidebar-grid-inner--snap'), '普通 hover 不得取消 snap').toBe(true)
+  })
+
+  it('正常 grid 内 up 与阈值后 capture/up：仍 releasePointerCapture 并回到 snap 原行为', async () => {
+    const el = mountSinglebox({ itemIndex: B5_INDEX })
+    const grid = el.querySelector<HTMLElement>('.nei-sidebar-grid')!
+    const inner = grid.firstElementChild as HTMLElement
+    const { set, release } = captureProbe(grid)
+
+    // 阈值前：grid 内 up 走既有 endPull（release 即使未 capture 也调用，行为不变）。
+    grid.dispatchEvent(pointerAt('pointerdown', { x: 10, y: 100, buttons: 1 }))
+    grid.dispatchEvent(pointerAt('pointerup', { x: 10, y: 100, buttons: 0 }))
+    expect(set, '阈值前 grid 内 up 不 capture').not.toHaveBeenCalled()
+    expect(release, '既有 endPull 仍 releasePointerCapture').toHaveBeenCalledWith(7)
+    await nextTick()
+    expect(inner.classList.contains('nei-sidebar-grid-inner--snap'), 'up 后回到 snap 原行为').toBe(true)
+
+    // 阈值后：capture 生效，grid 内 up target=grid，仍走 endPull 释放并 reset。
+    grid.dispatchEvent(pointerAt('pointerdown', { x: 10, y: 100, buttons: 1 }))
+    grid.dispatchEvent(pointerAt('pointermove', { x: 10, y: 105, buttons: 1 }))
+    expect(set, '越过阈值 capture 一次').toHaveBeenCalledTimes(1)
+    grid.dispatchEvent(pointerAt('pointerup', { x: 10, y: 105, buttons: 0 }))
+    expect(release, 'capture 后 up 仍 releasePointerCapture').toHaveBeenCalledTimes(2)
+    await nextTick()
+    expect(inner.classList.contains('nei-sidebar-grid-inner--snap'), 'capture 后 up 仍回到 snap 原行为').toBe(true)
+  })
+
+  it('onGridClick 与拖拽共享边界：恰好 4px 清空、5px 不清空', () => {
+    const onClear = vi.fn()
+    const el = mountSinglebox({ itemIndex: B5_INDEX, onClearSelection: onClear })
+    const grid = el.querySelector<HTMLElement>('.nei-sidebar-grid')!
+
+    grid.dispatchEvent(pointerAt('pointerdown', { x: 10, y: 100, buttons: 1 }))
+    grid.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 10, clientY: 104 }))
+    expect(onClear, '恰好 4px = 点击边界（清空）').toHaveBeenCalledTimes(1)
+
+    grid.dispatchEvent(pointerAt('pointerdown', { x: 10, y: 100, buttons: 1 }))
+    grid.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 10, clientY: 105 }))
+    expect(onClear, '5px = 拖拽（不清空）').toHaveBeenCalledTimes(1)
+  })
+
+  it('unmount 移除 window pointerup/pointercancel 监听（无泄漏）', () => {
+    const removeSpy = vi.spyOn(window, 'removeEventListener')
+    const { el, app } = mountSidebar(runtimeDefOf(singleboxFixture), { itemIndex: B5_INDEX })
+    const grid = el.querySelector<HTMLElement>('.nei-sidebar-grid')!
+    grid.dispatchEvent(pointerAt('pointerdown', { x: 10, y: 100, buttons: 1 }))
+
+    app.unmount()
+    apps.pop() // 已手动卸载：避免 afterEach 重复卸载
+
+    expect(removeSpy).toHaveBeenCalledWith('pointerup', expect.any(Function), true)
+    expect(removeSpy).toHaveBeenCalledWith('pointercancel', expect.any(Function), true)
+    removeSpy.mockRestore()
+  })
+})
