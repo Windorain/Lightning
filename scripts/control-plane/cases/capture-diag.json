@@ -1,0 +1,31 @@
+{
+  "schema": "lightning.case/1",
+  "id": "capture-diag",
+  "label": "捕获通道诊断迁移验收：TESR 管格 + 箱格（真实渲染循环，非逐格驱动）",
+  "world": {
+    "folder": "cp_capture_diag",
+    "seed": 20261007,
+    "void": true,
+    "base": [513, 4, -647],
+    "settleTicks": 60
+  },
+  "build": [
+    { "op": "clear", "from": [511, 3, -649], "to": [517, 6, -645] },
+    { "op": "te", "at": [513, 4, -647], "completer": "lp-pipe", "params": { "pipe": "LogisticsPipes:item.PipeItemsBasicLogistics" } },
+    { "op": "te", "at": [514, 4, -647], "completer": "lp-pipe", "params": { "pipe": "LogisticsPipes:item.PipeItemsBasicLogistics" } },
+    { "op": "block", "at": [515, 4, -647], "id": "minecraft:chest", "meta": 3 },
+    { "op": "te", "at": [515, 4, -647], "completer": "vanilla", "params": {} },
+    { "op": "wait", "ticks": 20 }
+  ],
+  "criteria": [
+    { "id": "world-hash", "type": "world-hash-equals", "params": {} },
+    { "id": "scene-manifest-exists", "type": "artifact-exists", "params": { "path": "world/scene-manifest.json" } }
+  ],
+  "evidence": {
+    "expect": [
+      { "path": "observation.json", "role": "observation" },
+      { "path": "criteria.json", "role": "criteria" },
+      { "path": "world/scene-manifest.json", "role": "scene-manifest" }
+    ]
+  }
+}
